@@ -20,7 +20,7 @@ let cronTask = null;
 bot.command('start', (ctx) => {
 	cronTask?.stop?.();
 	
-	cronTask = cron.schedule('0 * * * *', () => {
+	cronTask = cron.schedule('0 8 * * *', () => {
 		sendReport(ctx);
 	}, {
 		scheduled: true,
