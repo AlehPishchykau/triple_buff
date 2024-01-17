@@ -1,4 +1,10 @@
 {
   "name": "triple_buff",
-  "packageManager": "yarn@4.0.2"
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "node-cron": "^3.0.3",
+    "telegraf": "^4.15.3"
+  }
 }
