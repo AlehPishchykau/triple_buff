@@ -90,6 +90,21 @@ bot.action(/last:.+/, (ctx) => {
 	sendLastMatchStats(ctx, playerId);
 });
 
+bot.telegram.setMyCommands([
+	{
+	  command: 'last',
+	  description: 'Статистика последнего турбированного матча',
+	},
+	{
+	  command: 'winrate',
+	  description: 'Винрейт турбо за всё время',
+	},
+	{
+		command: 'winrate30',
+		description: 'Винрейт турбо за последний месяц',
+	}
+]);
+
 bot.launch();
 
 // Enable graceful stop
