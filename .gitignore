@@ -13,3 +13,4 @@
 .pnp.*
 output.json
 .env
+node_modules
