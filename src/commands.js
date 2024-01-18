@@ -93,6 +93,14 @@ async function sendLastMatchStats(ctx, playerId) {
 	await ctx.replyWithHTML(message);
 }
 
+async function deleteMessage(ctx) {
+	try {
+		await ctx.deleteMessage(ctx.update.message.messageId);
+	} catch(error) {
+		console.log(error);
+	}
+}
+
 ////// PARSER //////
 function parseMatchesData(matchesByPlayer) {
 	const result = {
@@ -238,5 +246,6 @@ module.exports = {
 	sendMatchesSummary,
 	sendMVP,
 	sendPlayerWinrate,
-	sendLastMatchStats
+	sendLastMatchStats,
+	deleteMessage
 };

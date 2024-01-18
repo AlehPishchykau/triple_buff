@@ -2,7 +2,7 @@ require('dotenv').config();
 const cron = require('node-cron');
 const { Markup, Telegraf } = require('telegraf');
 
-const { sendReport, sendPlayerWinrate, sendLastMatchStats } = require('./commands');
+const { sendReport, sendPlayerWinrate, sendLastMatchStats, deleteMessage } = require('./commands');
 const { storage } = require('./storage');
 const { SERVER_URL, TELEGRAM_BOT_TOKEN } = process.env;
 
@@ -10,6 +10,7 @@ const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 let cronTask = null;
 
 bot.command('start', (ctx) => {
+	deleteMessage(ctx);
 	cronTask?.stop?.();
 	
 	cronTask = cron.schedule('0 8 * * *', () => {
@@ -21,15 +22,19 @@ bot.command('start', (ctx) => {
 });
 
 bot.command('stop', (ctx) => {
+	deleteMessage(ctx);
 	cronTask?.stop?.();
 	cronTask = null;
 });
 
 bot.command('cron', (ctx) => {
+	deleteMessage(ctx);
 	ctx.sendMessage(cronTask ? 'Cron is working' : 'Cron is stopped');
 });
 
 bot.command('winrate', async (ctx) => {
+	deleteMessage(ctx);
+
 	const playersData = await storage.getPlayers();
 	const buttons = Object.entries(playersData).map(([id, data]) => {
 		return Markup.button.callback(data.name, `winrate:${id}`);
@@ -42,6 +47,8 @@ bot.command('winrate', async (ctx) => {
 });
 
 bot.command('winrate30', async (ctx) => {
+	deleteMessage(ctx);
+
 	const playersData = await storage.getPlayers();
 	const buttons = Object.entries(playersData).map(([id, data]) => {
 		return Markup.button.callback(data.name, `winrate30:${id}`);
@@ -54,6 +61,8 @@ bot.command('winrate30', async (ctx) => {
 });
 
 bot.command('last', async (ctx) => {
+	deleteMessage(ctx);
+
 	const playersData = await storage.getPlayers();
 	const buttons = Object.entries(playersData).map(([id, data]) => {
 		return Markup.button.callback(data.name, `last:${id}`);
@@ -66,6 +75,7 @@ bot.command('last', async (ctx) => {
 });
 
 bot.command('adios', async (ctx) => {
+	deleteMessage(ctx);
 	ctx.replyWithVoice('BQACAgIAAxkBAAIBLWWpm5CuDGxJZe5dkFhVLCK-0k8KAAKyPgACgwVJSVAsluDHpCQlNAQ');
 });
 
