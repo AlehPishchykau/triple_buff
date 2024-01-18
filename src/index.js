@@ -37,7 +37,7 @@ bot.command('winrate', async (ctx) => {
 
 	return ctx.reply(
 		'Выбери мужика:',
-		Markup.inlineKeyboard(buttons, { columns: 2 })
+		Markup.inlineKeyboard(buttons, { columns: 1 })
 	);
 });
 
@@ -49,7 +49,7 @@ bot.command('winrate30', async (ctx) => {
 
 	return ctx.reply(
 		'Выбери мужика:',
-		Markup.inlineKeyboard(buttons, { columns: 2 })
+		Markup.inlineKeyboard(buttons, { columns: 1 })
 	);
 });
 
@@ -61,14 +61,12 @@ bot.command('last', async (ctx) => {
 
 	return ctx.reply(
 		'Выбери мужика:',
-		Markup.inlineKeyboard(buttons, { columns: 2 })
+		Markup.inlineKeyboard(buttons, { columns: 1 })
 	);
 });
 
 bot.command('adios', async (ctx) => {
-	if (SERVER_URL) {
-		ctx.replyWithVoice(SERVER_URL + '/sound.opus');
-	}
+	ctx.replyWithVoice('BQACAgIAAxkBAAIBLWWpm5CuDGxJZe5dkFhVLCK-0k8KAAKyPgACgwVJSVAsluDHpCQlNAQ');
 });
 
 bot.action(/winrate:.+/, (ctx) => {
