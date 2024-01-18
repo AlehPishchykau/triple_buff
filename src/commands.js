@@ -8,11 +8,7 @@ const {
 	fetchGameModes
 } = require('./requests');
 const { storage } = require('./storage');
-
-const {
-	secondsToTime,
-	writeJSONToFile
-} = require('./utils');
+const { secondsToTime } = require('./utils');
 
 async function sendReport(ctx) {
 	const matchesData = await fetchMatchesData();
@@ -40,21 +36,23 @@ async function sendMVP(ctx, mvp) {
 	}
 }
 
-async function sendPlayerWinrate(ctx, playerId) {
+async function sendPlayerWinrate(ctx, playerId, period = 'allTime') {
 	const players = await storage.getPlayers();
 	const matches = await fetchPlayerMatchesStats(playerId);
-	const turboMatchesStats = matches.allTime.gameModeMatches.find((matchesByGameMode) => matchesByGameMode.id === TURBO_ID);
+	const turboMatchesStats = matches[period].gameModeMatches.find((matchesByGameMode) => matchesByGameMode.id === TURBO_ID);
 
 	if (!players[playerId]) {
 		return;
 	}
 
+	const periodString = period === 'allTime' ? 'за всё время' : 'за последний месяц';
+
 	const message = `
 		<blockquote>
 		<u><b>${players[playerId].name}</b></u>
 
-		Всего турбированных игр: ${turboMatchesStats.matchCount}.
-		Винрейт: ${Math.round(turboMatchesStats.win / turboMatchesStats.matchCount * 100)}%.
+		Всего турбированных игр ${periodString}: ${turboMatchesStats.matchCount}.
+		Винрейт: ${(turboMatchesStats.win / turboMatchesStats.matchCount * 100).toFixed(1)}%.
 		</blockquote>
 	`;
 
@@ -76,6 +74,7 @@ async function sendLastMatchStats(ctx, playerId) {
 	const message = `
 		<blockquote>
 		<u><b>${players[playerId].name}</b></u>
+		${(new Date(lastMatchData.startDateTime * 1000)).toLocaleString('ru-RU', { timeZone: 'UTC' })} (UTC)
 
 		В ластецкой катке был ${lastMatchPlayerData.isVictory ? 'разъёб' : 'посос'} на ${hero.displayName}.
 		Длительность: ${secondsToTime(lastMatchData.durationSeconds)}
@@ -86,6 +85,8 @@ async function sendLastMatchStats(ctx, playerId) {
 
 		Hero DMG: ${lastMatchPlayerData.heroDamage}
 		Tower DMG: ${lastMatchPlayerData.towerDamage}
+
+		https://www.dotabuff.com/matches/${lastMatchData.id}
 		</blockquote>
 	`;
 

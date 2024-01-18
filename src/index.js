@@ -4,7 +4,7 @@ const { Markup, Telegraf } = require('telegraf');
 
 const { sendReport, sendPlayerWinrate, sendLastMatchStats } = require('./commands');
 const { storage } = require('./storage');
-const { TELEGRAM_BOT_TOKEN } = process.env;
+const { SERVER_URL, TELEGRAM_BOT_TOKEN } = process.env;
 
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 let cronTask = null;
@@ -29,14 +29,22 @@ bot.command('cron', (ctx) => {
 	ctx.sendMessage(cronTask ? 'Cron is working' : 'Cron is stopped');
 });
 
-bot.command('report', (ctx) => {
-	sendReport(ctx);
-});
-
 bot.command('winrate', async (ctx) => {
 	const playersData = await storage.getPlayers();
 	const buttons = Object.entries(playersData).map(([id, data]) => {
 		return Markup.button.callback(data.name, `winrate:${id}`);
+	});
+
+	return ctx.reply(
+		'Выбери мужика:',
+		Markup.inlineKeyboard(buttons, { columns: 2 })
+	);
+});
+
+bot.command('winrate30', async (ctx) => {
+	const playersData = await storage.getPlayers();
+	const buttons = Object.entries(playersData).map(([id, data]) => {
+		return Markup.button.callback(data.name, `winrate30:${id}`);
 	});
 
 	return ctx.reply(
@@ -57,11 +65,24 @@ bot.command('last', async (ctx) => {
 	);
 });
 
+bot.command('adios', async (ctx) => {
+	if (SERVER_URL) {
+		ctx.replyWithVoice(SERVER_URL + '/sound.opus');
+	}
+});
+
 bot.action(/winrate:.+/, (ctx) => {
 	const command = ctx.match[0];
 	const playerId = command.split(':')[1];
 
 	sendPlayerWinrate(ctx, playerId);
+});
+
+bot.action(/winrate30:.+/, (ctx) => {
+	const command = ctx.match[0];
+	const playerId = command.split(':')[1];
+
+	sendPlayerWinrate(ctx, playerId, 'oneMonth');
 });
 
 bot.action(/last:.+/, (ctx) => {
