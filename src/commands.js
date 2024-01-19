@@ -112,7 +112,7 @@ async function sendLastMatchStats(ctx, playerId) {
 
 	const message = `
 		<blockquote>
-		<b>${players[playerId].name}</b> ${lastMatchPlayerData.isVictory ? 'won' : 'lost'} last match on ${hero.displayName}
+		<b>${players[playerId].name}</b> <a href="https://www.dotabuff.com/matches/${lastMatchData.id}">${lastMatchPlayerData.isVictory ? 'won' : 'lost'} last match on ${hero.displayName}</a>
 		${(new Date(lastMatchData.startDateTime * 1000)).toLocaleString('ru-RU', { timeZone: 'UTC' })} (UTC)
 
 		Duration: ${secondsToTime(lastMatchData.durationSeconds)}
@@ -122,8 +122,6 @@ async function sendLastMatchStats(ctx, playerId) {
 
 		Hero DMG: ${lastMatchPlayerData.heroDamage}
 		Tower DMG: ${lastMatchPlayerData.towerDamage}
-
-		https://www.dotabuff.com/matches/${lastMatchData.id}
 		</blockquote>
 	`;
 
