@@ -8,7 +8,8 @@ const {
 	sendPlayersWinrate,
 	sendLastMatchStats,
 	deleteMessage,
-	deleteAction
+	deleteAction,
+	sendLastPlayTime
 } = require('./commands');
 const { storage } = require('./storage');
 const { TELEGRAM_BOT_TOKEN } = process.env;
@@ -91,6 +92,12 @@ bot.command('last', async (ctx) => {
 	);
 });
 
+bot.command('time', async (ctx) => {
+	await deleteMessage(ctx);
+
+	sendLastPlayTime(ctx);
+});
+
 bot.command('adios', async (ctx) => {
 	await deleteMessage(ctx);
 	ctx.replyWithVoice('BQACAgIAAxkBAAIBLWWpm5CuDGxJZe5dkFhVLCK-0k8KAAKyPgACgwVJSVAsluDHpCQlNAQ');
@@ -127,6 +134,10 @@ bot.telegram.setMyCommands([
 	{
 		command: 'last',
 		description: 'Last turbo match stats',
+	},
+	{
+		command: 'time',
+		description: 'Time without Dota 2',
 	},
 	{
 		command: 'winrate',

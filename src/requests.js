@@ -1,4 +1,4 @@
-const { PLAYERS_IDS } = require('./constants');
+const { PLAYERS_IDS, TURBO_ID } = require('./constants');
 const { request } = require('./utils');
 
 async function fetchMatchesData() {
@@ -50,8 +50,8 @@ async function fetchPlayerData(playerId) {
 	return await response.json();
 }
 
-async function fetchLastMatchData(playerId) {
-	const response = await request(`Player/${playerId}/matches?take=1&gameMode=23`);
+async function fetchLastMatchData(playerId, gameModeId) {
+	const response = await request(`Player/${playerId}/matches?take=1${gameModeId ? `&gameMode=${gameModeId}` : '' }`);
 	const matches = await response.json();
 
 	return matches[0];

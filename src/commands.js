@@ -6,7 +6,7 @@ const {
 	fetchLastMatchData
 } = require('./requests');
 const { storage } = require('./storage');
-const { secondsToTime } = require('./utils');
+const { secondsToTime, convertMiliseconds, writeJSONToFile } = require('./utils');
 
 async function sendReport(ctx) {
 	const matchesData = await fetchMatchesData();
@@ -53,7 +53,7 @@ async function sendPlayersWinrate(ctx, period = 'allTime') {
 
 	const response = await Promise.all(requests);
 	const periodString = period === 'allTime' ? 'All time' : 'Last month';
-	const players = Object.values(playersMap)
+	const players = Object.values(playersMap);
 
 	const playersStats = response.map((matches, index) => {
 		const turboMatchesStats = matches[period].gameModeMatches.find((matchesByGameMode) => matchesByGameMode.id === TURBO_ID);
@@ -101,7 +101,7 @@ async function sendPlayerWinrate(ctx, playerId, period = 'allTime') {
 async function sendLastMatchStats(ctx, playerId) {
 	const players = await storage.getPlayers();
 	const heroes = await storage.getHeroes();
-	const lastMatchData = await fetchLastMatchData(playerId);
+	const lastMatchData = await fetchLastMatchData(playerId, TURBO_ID);
 
 	if (!lastMatchData || !players[playerId]) {
 		return;
@@ -122,6 +122,28 @@ async function sendLastMatchStats(ctx, playerId) {
 
 		Hero DMG: ${lastMatchPlayerData.heroDamage}
 		Tower DMG: ${lastMatchPlayerData.towerDamage}
+		</blockquote>
+	`;
+
+	await ctx.replyWithHTML(message);
+}
+
+async function sendLastPlayTime(ctx) {
+	const playersMap = await storage.getPlayers();
+	const requests = Object.keys(playersMap).map((playerId) => fetchLastMatchData(playerId));
+	const response = await Promise.all(requests);
+	const players = Object.values(playersMap);
+
+	const timeStats = response.map((matchData, index) => {
+		const time = Date.now() - (matchData.endDateTime * 1000);
+
+		return `${players[index].name}: ${convertMiliseconds(time)}`;
+	})
+
+	const message = `
+		<blockquote>
+		<b>Time without Dota 2</b>
+		\n${timeStats.join('\n')}
 		</blockquote>
 	`;
 
@@ -299,6 +321,7 @@ module.exports = {
 	sendPlayerWinrate,
 	sendPlayersWinrate,
 	sendLastMatchStats,
+	sendLastPlayTime,
 	deleteMessage,
 	deleteAction
 };
