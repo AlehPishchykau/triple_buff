@@ -3,9 +3,7 @@ const {
 	fetchMatchesData,
 	fetchPlayersData,
 	fetchPlayerMatchesStats,
-	fetchLastMatchData,
-	fetchPlayerHeroesStats,
-	fetchGameModes
+	fetchLastMatchData
 } = require('./requests');
 const { storage } = require('./storage');
 const { secondsToTime } = require('./utils');
@@ -28,12 +26,53 @@ async function sendMatchesSummary(ctx, message) {
 }
 
 async function sendMVP(ctx, mvp) {
+	const message = `
+		<blockquote>
+		<b>MVP - ${players[playerId].name}</b>
+		WL: ${mvp.wins} - ${mvp.loses} 
+		Avg KDA: ${lastMatchPlayerData.numKills} - ${lastMatchPlayerData.numDeaths} - ${lastMatchPlayerData.numAssists}
+		Avg Networth: ${lastMatchPlayerData.networth}
+		</blockquote>
+	`;
+
+	await ctx.replyWithHTML(message);
+
 	if (mvp.avatar) {
 		await ctx.replyWithPhoto(
 			mvp.avatar,
-			{ caption: 'MVP', has_spoiler: true }
+			{ has_spoiler: true }
 		);
 	}
+}
+
+async function sendPlayersWinrate(ctx, period = 'allTime') {
+	const playersMap = await storage.getPlayers();
+	const requests = Object.keys(playersMap).map((playerId) => {
+		return fetchPlayerMatchesStats(playerId);
+	});
+
+	const response = await Promise.all(requests);
+	const periodString = period === 'allTime' ? 'All time' : 'Last month';
+	const players = Object.values(playersMap)
+
+	const playersStats = response.map((matches, index) => {
+		const turboMatchesStats = matches[period].gameModeMatches.find((matchesByGameMode) => matchesByGameMode.id === TURBO_ID);
+
+		return `
+			<b>${players[index].name}</b>
+			Matches: ${turboMatchesStats.matchCount}
+			Winrate: ${(turboMatchesStats.win / turboMatchesStats.matchCount * 100).toFixed(1)}%
+		`;
+	})
+
+	const message = `
+		<blockquote>
+		<b>${periodString} turbo matches</b>
+		${playersStats.join('')}
+		</blockquote>
+	`;
+
+	await ctx.replyWithHTML(message);
 }
 
 async function sendPlayerWinrate(ctx, playerId, period = 'allTime') {
@@ -45,14 +84,14 @@ async function sendPlayerWinrate(ctx, playerId, period = 'allTime') {
 		return;
 	}
 
-	const periodString = period === 'allTime' ? 'за всё время' : 'за последний месяц';
+	const periodString = period === 'allTime' ? 'All time' : 'Last month';
 
 	const message = `
 		<blockquote>
-		<u><b>${players[playerId].name}</b></u>
+		<b>${players[playerId].name}</b>
 
-		Всего турбированных игр ${periodString}: ${turboMatchesStats.matchCount}.
-		Винрейт: ${(turboMatchesStats.win / turboMatchesStats.matchCount * 100).toFixed(1)}%.
+		${periodString} turbo matches: ${turboMatchesStats.matchCount}
+		Winrate: ${(turboMatchesStats.win / turboMatchesStats.matchCount * 100).toFixed(1)}%
 		</blockquote>
 	`;
 
@@ -73,12 +112,10 @@ async function sendLastMatchStats(ctx, playerId) {
 
 	const message = `
 		<blockquote>
-		<u><b>${players[playerId].name}</b></u>
+		<b>${players[playerId].name}</b> ${lastMatchPlayerData.isVictory ? 'won' : 'lost'} last match on ${hero.displayName}
 		${(new Date(lastMatchData.startDateTime * 1000)).toLocaleString('ru-RU', { timeZone: 'UTC' })} (UTC)
 
-		В ластецкой катке был ${lastMatchPlayerData.isVictory ? 'разъёб' : 'посос'} на ${hero.displayName}.
-		Длительность: ${secondsToTime(lastMatchData.durationSeconds)}
-
+		Duration: ${secondsToTime(lastMatchData.durationSeconds)}
 		KDA: ${lastMatchPlayerData.numKills} - ${lastMatchPlayerData.numDeaths} - ${lastMatchPlayerData.numAssists}
 		Networth: ${lastMatchPlayerData.networth}
 		Level: ${lastMatchPlayerData.level}
@@ -96,6 +133,14 @@ async function sendLastMatchStats(ctx, playerId) {
 async function deleteMessage(ctx) {
 	try {
 		await ctx.deleteMessage(ctx.update.message.messageId);
+	} catch(error) {
+		console.log(error);
+	}
+}
+
+async function deleteAction(ctx) {
+	try {
+		await ctx.deleteMessage(ctx.update.callback_query.message.messageId);
 	} catch(error) {
 		console.log(error);
 	}
@@ -167,7 +212,7 @@ function parseMatchesData(matchesByPlayer) {
 function getSummary(data, playersMap) {
 	const wins = Object.keys(data.summary.wins).length;
 	const loses = Object.keys(data.summary.loses).length;
-	const players = Object.keys(data.players).map((playerId) => playersMap[playerId].name).sort();
+	const players = Object.keys(data.players).map((playerId) => playersMap[playerId].name);
 	const stats = {};
 
 	if (!players.length) {
@@ -201,19 +246,20 @@ function getSummary(data, playersMap) {
 		}
 	});
 
-	let message = '<blockquote>Статистика вчерашних каток:\n\n';
+	let message = '<blockquote>Yesterday matches stats:\n\n';
 
 	if (players.length === 1) {
-		message += `Единственный крепкий мужчина - ${players[0]}.`;
+		message += `The only strong man - ${players[0]}. Respect!`;
 	} else {
-		message += `Крепкие мужчины слева направо - ${players.join(', ')}.`;
+		message += `Strong men - ${players.join(', ')}.`;
 	}
 
-	message += `\nПобед - ${wins}. Поражений - ${loses}`;
-	message += `\nСамая долгая катка длилась ${secondsToTime(data.summary.longestMatchDuration)}. Самая короткая - ${secondsToTime(data.summary.shortestMatchDuration)}.`;
+	message += `\nWL: ${wins} - ${loses}`;
+	message += `\nLongest match - ${secondsToTime(data.summary.longestMatchDuration)}`;
+	message += `\nShortest match - ${secondsToTime(data.summary.shortestMatchDuration)}`;
 	message += '\n';
-	message += `\nЛучший KDA - ${stats.topKDA.value.toFixed(2)} (${stats.topKDA.name})`;
-	message += `\nЛучший нетворс - ${stats.topNW.value} (${stats.topNW.name})`;
+	message += `\nBest KDA: ${stats.topKDA.value.toFixed(2)} (${stats.topKDA.name})`;
+	message += `\nBest Networth: ${stats.topNW.value} (${stats.topNW.name})`;
 	message += '</blockquote>';
 
 	return message;
@@ -223,8 +269,11 @@ function getMVP(data, playersMap) {
 	let mvp = {};
 
 	Object.entries(data.players).forEach(([key, value]) => {
-		const kdaAvg = value.kdas.reduce((a, b) => a + b, 0) / value.kdas.length;
-		const nwAvg = value.nws.reduce((a, b) => a + b, 0) / value.nws.length;
+		const {
+			wins, loses, kdas, nws
+		} = value;
+		const kdaAvg = kdas.reduce((a, b) => a + b, 0) / kdas.length;
+		const nwAvg = nws.reduce((a, b) => a + b, 0) / nws.length;
 		const score = kdaAvg * 100 + nwAvg;
 
 		if (score > (mvp.score || 0)) {
@@ -234,6 +283,10 @@ function getMVP(data, playersMap) {
 				avatar,
 				name,
 				score,
+				wins,
+				loses,
+				kdaAvg,
+				nwAvg
 			}
 		}
 	});
@@ -246,6 +299,8 @@ module.exports = {
 	sendMatchesSummary,
 	sendMVP,
 	sendPlayerWinrate,
+	sendPlayersWinrate,
 	sendLastMatchStats,
-	deleteMessage
+	deleteMessage,
+	deleteAction
 };

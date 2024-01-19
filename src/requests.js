@@ -30,7 +30,7 @@ async function fetchPlayersData() {
 
 	const responses = await Promise.all(playersRequests);
 	const playersData = await Promise.all(responses.map(response => response.json()));
-	const result = playersData.sort().reduce((acc, value) => {
+	const result = playersData.reduce((acc, value) => {
 		const { id, avatar, name } = value.steamAccount;
 
 		acc[id] = {

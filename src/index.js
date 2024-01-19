@@ -2,15 +2,22 @@ require('dotenv').config();
 const cron = require('node-cron');
 const { Markup, Telegraf } = require('telegraf');
 
-const { sendReport, sendPlayerWinrate, sendLastMatchStats, deleteMessage } = require('./commands');
+const { 
+	sendReport,
+	sendPlayerWinrate,
+	sendPlayersWinrate,
+	sendLastMatchStats,
+	deleteMessage,
+	deleteAction
+} = require('./commands');
 const { storage } = require('./storage');
-const { SERVER_URL, TELEGRAM_BOT_TOKEN } = process.env;
+const { TELEGRAM_BOT_TOKEN } = process.env;
 
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 let cronTask = null;
 
-bot.command('start', (ctx) => {
-	deleteMessage(ctx);
+bot.command('start', async (ctx) => {
+	await deleteMessage(ctx);
 	cronTask?.stop?.();
 	
 	cronTask = cron.schedule('0 8 * * *', () => {
@@ -21,19 +28,19 @@ bot.command('start', (ctx) => {
 	});
 });
 
-bot.command('stop', (ctx) => {
-	deleteMessage(ctx);
+bot.command('stop', async (ctx) => {
+	await deleteMessage(ctx);
 	cronTask?.stop?.();
 	cronTask = null;
 });
 
-bot.command('cron', (ctx) => {
-	deleteMessage(ctx);
+bot.command('cron', async (ctx) => {
+	await deleteMessage(ctx);
 	ctx.sendMessage(cronTask ? 'Cron is working' : 'Cron is stopped');
 });
 
 bot.command('winrate', async (ctx) => {
-	deleteMessage(ctx);
+	await deleteMessage(ctx);
 
 	const playersData = await storage.getPlayers();
 	const buttons = Object.entries(playersData).map(([id, data]) => {
@@ -41,13 +48,13 @@ bot.command('winrate', async (ctx) => {
 	});
 
 	return ctx.reply(
-		'Выбери мужика:',
+		'All time winrate',
 		Markup.inlineKeyboard(buttons, { columns: 1 })
 	);
 });
 
 bot.command('winrate30', async (ctx) => {
-	deleteMessage(ctx);
+	await deleteMessage(ctx);
 
 	const playersData = await storage.getPlayers();
 	const buttons = Object.entries(playersData).map(([id, data]) => {
@@ -55,13 +62,23 @@ bot.command('winrate30', async (ctx) => {
 	});
 
 	return ctx.reply(
-		'Выбери мужика:',
+		'Last month winrate',
 		Markup.inlineKeyboard(buttons, { columns: 1 })
 	);
 });
 
+bot.command('winrate_all', async (ctx) => {
+	await deleteMessage(ctx);
+	await sendPlayersWinrate(ctx);
+});
+
+bot.command('winrate30_all', async (ctx) => {
+	await deleteMessage(ctx);
+	await sendPlayersWinrate(ctx, 'oneMonth');
+});
+
 bot.command('last', async (ctx) => {
-	deleteMessage(ctx);
+	await deleteMessage(ctx);
 
 	const playersData = await storage.getPlayers();
 	const buttons = Object.entries(playersData).map(([id, data]) => {
@@ -69,31 +86,37 @@ bot.command('last', async (ctx) => {
 	});
 
 	return ctx.reply(
-		'Выбери мужика:',
+		'Last turbo match stats',
 		Markup.inlineKeyboard(buttons, { columns: 1 })
 	);
 });
 
 bot.command('adios', async (ctx) => {
-	deleteMessage(ctx);
+	await deleteMessage(ctx);
 	ctx.replyWithVoice('BQACAgIAAxkBAAIBLWWpm5CuDGxJZe5dkFhVLCK-0k8KAAKyPgACgwVJSVAsluDHpCQlNAQ');
 });
 
-bot.action(/winrate:.+/, (ctx) => {
+bot.action(/winrate:.+/, async (ctx) => {
+	await deleteAction(ctx);
+
 	const command = ctx.match[0];
 	const playerId = command.split(':')[1];
 
 	sendPlayerWinrate(ctx, playerId);
 });
 
-bot.action(/winrate30:.+/, (ctx) => {
+bot.action(/winrate30:.+/, async (ctx) => {
+	await deleteAction(ctx);
+
 	const command = ctx.match[0];
 	const playerId = command.split(':')[1];
 
 	sendPlayerWinrate(ctx, playerId, 'oneMonth');
 });
 
-bot.action(/last:.+/, (ctx) => {
+bot.action(/last:.+/, async (ctx) => {
+	await deleteAction(ctx);
+
 	const command = ctx.match[0];
 	const playerId = command.split(':')[1];
 
@@ -102,16 +125,24 @@ bot.action(/last:.+/, (ctx) => {
 
 bot.telegram.setMyCommands([
 	{
-	  command: 'last',
-	  description: 'Статистика последнего турбированного матча',
+		command: 'last',
+		description: 'Last turbo match stats',
 	},
 	{
-	  command: 'winrate',
-	  description: 'Винрейт турбо за всё время',
+		command: 'winrate',
+		description: 'All time winrate in turbo',
 	},
 	{
 		command: 'winrate30',
-		description: 'Винрейт турбо за последний месяц',
+		description: 'Last month winrate in turbo',
+	},
+	{
+		command: 'winrate_all',
+		description: 'All time winrate in turbo for all men',
+	},
+	{
+		command: 'winrate30_all',
+		description: 'Last month winrate in turbo for all men',
 	}
 ]);
 
