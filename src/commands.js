@@ -28,10 +28,10 @@ async function sendMatchesSummary(ctx, message) {
 async function sendMVP(ctx, mvp) {
 	const message = `
 		<blockquote>
-		<b>MVP - ${players[playerId].name}</b>
+		<b>MVP - ${mvp.name}</b>
 		WL: ${mvp.wins} - ${mvp.loses} 
-		Avg KDA: ${lastMatchPlayerData.numKills} - ${lastMatchPlayerData.numDeaths} - ${lastMatchPlayerData.numAssists}
-		Avg Networth: ${lastMatchPlayerData.networth}
+		Avg KDA: ${mvp.kdaAvg.toFixed(1)}
+		Avg Networth: ${mvp.nwAvg.toFixed(0)}
 		</blockquote>
 	`;
 
@@ -266,7 +266,7 @@ function getSummary(data, playersMap) {
 		}
 	});
 
-	let message = '<blockquote>Yesterday matches stats:\n\n';
+	let message = '<blockquote><b>Yesterday matches stats</b>\n\n';
 
 	if (players.length === 1) {
 		message += `The only strong man - ${players[0]}. Respect!`;
