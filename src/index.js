@@ -40,6 +40,11 @@ bot.command('cron', async (ctx) => {
 	ctx.sendMessage(cronTask ? 'Cron is working' : 'Cron is stopped');
 });
 
+bot.command('report', async (ctx) => {
+	await deleteMessage(ctx);
+	sendReport(ctx);
+});
+
 bot.command('winrate', async (ctx) => {
 	await deleteMessage(ctx);
 
