@@ -291,7 +291,7 @@ function getMVP(data, playersMap) {
 		} = value;
 		const kdaAvg = kdas.reduce((a, b) => a + b, 0) / kdas.length;
 		const nwAvg = nws.reduce((a, b) => a + b, 0) / nws.length;
-		const score = (wins + loses) * 1000 + kdaAvg * 100 + nwAvg;
+		const score = 10000 * wins + 3000 * loses + kdaAvg * 100 + nwAvg / 1000;
 
 		if (score > (mvp.score || 0)) {
 			const { avatar, name} = playersMap[key];
