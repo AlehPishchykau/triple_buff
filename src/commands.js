@@ -38,10 +38,7 @@ async function sendMVP(ctx, mvp) {
 	await ctx.replyWithHTML(message);
 
 	if (mvp.avatar) {
-		await ctx.replyWithPhoto(
-			mvp.avatar,
-			{ has_spoiler: true }
-		);
+		await ctx.replyWithPhoto(mvp.avatar);
 	}
 }
 
@@ -278,7 +275,7 @@ function getSummary(data, playersMap) {
 	message += `\nLongest match - ${secondsToTime(data.summary.longestMatchDuration)}`;
 	message += `\nShortest match - ${secondsToTime(data.summary.shortestMatchDuration)}`;
 	message += '\n';
-	message += `\nBest KDA: ${stats.topKDA.value.toFixed(2)} (${stats.topKDA.name})`;
+	message += `\nBest KDA: ${stats.topKDA.value.toFixed(1)} (${stats.topKDA.name})`;
 	message += `\nBest Networth: ${stats.topNW.value} (${stats.topNW.name})`;
 	message += '</blockquote>';
 
@@ -294,7 +291,7 @@ function getMVP(data, playersMap) {
 		} = value;
 		const kdaAvg = kdas.reduce((a, b) => a + b, 0) / kdas.length;
 		const nwAvg = nws.reduce((a, b) => a + b, 0) / nws.length;
-		const score = kdaAvg * 100 + nwAvg;
+		const score = (wins + loses) * 1000 + kdaAvg * 100 + nwAvg;
 
 		if (score > (mvp.score || 0)) {
 			const { avatar, name} = playersMap[key];
