@@ -97,37 +97,52 @@ bot.command('adios', async (ctx) => {
 });
 
 bot.action(/wr_period:(.+)/, async (ctx) => {
-	const period = ctx.match[1];
-	const playersData = await storage.getPlayers();
-	const playerButtons = Object.entries(playersData).map(([id, data]) =>
-		[Markup.button.callback(data.name, `wr_player:${period}:${id}`)]
-	);
-	const periodLabel = period === 'allTime' ? 'За все время' : 'За месяц';
-	await ctx.editMessageText(
-		`${periodLabel} — выбери игрока:`,
-		Markup.inlineKeyboard([
-			[Markup.button.callback('Все игроки', `wr_player:${period}:all`)],
-			...playerButtons
-		])
-	);
+	try {
+		await ctx.answerCbQuery();
+		const period = ctx.match[1];
+		const playersData = await storage.getPlayers();
+		const playerButtons = Object.entries(playersData).map(([id, data]) =>
+			[Markup.button.callback(data.name, `wr_player:${period}:${id}`)]
+		);
+		const periodLabel = period === 'allTime' ? 'За все время' : 'За месяц';
+		await ctx.editMessageText(
+			`${periodLabel} — выбери игрока:`,
+			Markup.inlineKeyboard([
+				[Markup.button.callback('Все игроки', `wr_player:${period}:all`)],
+				...playerButtons
+			])
+		);
+	} catch (err) {
+		console.log('wr_period error:', err.message);
+	}
 });
 
 bot.action(/wr_player:(.+):(.+)/, async (ctx) => {
-	await deleteAction(ctx);
-	const period = ctx.match[1];
-	const playerId = ctx.match[2];
-	if (playerId === 'all') {
-		await sendPlayersWinrate(ctx, period);
-	} else {
-		await sendPlayerWinrate(ctx, playerId, period);
+	try {
+		await ctx.answerCbQuery();
+		await deleteAction(ctx);
+		const period = ctx.match[1];
+		const playerId = ctx.match[2];
+		if (playerId === 'all') {
+			await sendPlayersWinrate(ctx, period);
+		} else {
+			await sendPlayerWinrate(ctx, playerId, period);
+		}
+	} catch (err) {
+		console.log('wr_player error:', err.message);
 	}
 });
 
 bot.action(/match:(\d+):(\d+)/, async (ctx) => {
-	await deleteAction(ctx);
-	const matchId = ctx.match[1];
-	const playerId = ctx.match[2];
-	sendMatchDetails(ctx, matchId, playerId);
+	try {
+		await ctx.answerCbQuery();
+		await deleteAction(ctx);
+		const matchId = ctx.match[1];
+		const playerId = ctx.match[2];
+		await sendMatchDetails(ctx, matchId, playerId);
+	} catch (err) {
+		console.log('match error:', err.message);
+	}
 });
 
 bot.telegram.setMyCommands([

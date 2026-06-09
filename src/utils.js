@@ -3,7 +3,7 @@ require('dotenv').config();
 const { STRATZ_GRAPHQL_URL } = require('./constants');
 const { STRATZ_TOKEN } = process.env;
 
-async function graphqlRequest(query, variables = {}) {
+async function graphqlRequest(query, variables = {}, retries = 2) {
 	const response = await fetch(STRATZ_GRAPHQL_URL, {
 		method: 'POST',
 		headers: {
@@ -13,6 +13,12 @@ async function graphqlRequest(query, variables = {}) {
 		},
 		body: JSON.stringify({ query, variables })
 	});
+
+	if (response.status === 429 && retries > 0) {
+		const delay = parseInt(response.headers.get('retry-after') || '3', 10) * 1000;
+		await new Promise(r => setTimeout(r, delay));
+		return graphqlRequest(query, variables, retries - 1);
+	}
 
 	if (!response.ok) {
 		throw new Error(`GraphQL request failed: ${response.status} ${response.statusText}`);
