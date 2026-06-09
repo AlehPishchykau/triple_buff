@@ -1,5 +1,7 @@
-const { PLAYERS_IDS, LOBBY_TYPE_TURBO } = require('./constants');
+const { PLAYERS_IDS } = require('./constants');
 const { openDotaGet, openDotaPost, isTurbo } = require('./utils');
+
+const TURBO_FILTER = 'game_mode=23&significant=0';
 
 async function refreshPlayers() {
 	await Promise.all(
@@ -44,8 +46,8 @@ async function fetchPlayerData(playerId) {
 
 async function fetchPlayerMatchesStats(playerId) {
 	const [allTime, oneMonth] = await Promise.all([
-		openDotaGet(`/players/${playerId}/wl?lobby_type=${LOBBY_TYPE_TURBO}`),
-		openDotaGet(`/players/${playerId}/wl?lobby_type=${LOBBY_TYPE_TURBO}&date=30`),
+		openDotaGet(`/players/${playerId}/wl?${TURBO_FILTER}`),
+		openDotaGet(`/players/${playerId}/wl?${TURBO_FILTER}&date=30`),
 	]);
 
 	return {
@@ -55,20 +57,24 @@ async function fetchPlayerMatchesStats(playerId) {
 }
 
 async function fetchPlayerHeroesStats(playerId) {
-	const heroes = await openDotaGet(`/players/${playerId}/heroes?lobby_type=${LOBBY_TYPE_TURBO}`);
-	return heroes.map(h => ({
-		heroId: Number(h.hero_id),
-		matchCount: h.games,
-		winCount: h.win,
-	}));
+	const heroes = await openDotaGet(`/players/${playerId}/heroes?${TURBO_FILTER}`);
+	return heroes
+		.filter(h => h.games > 0)
+		.map(h => ({
+			heroId: Number(h.hero_id),
+			matchCount: h.games,
+			winCount: h.win,
+		}));
 }
 
 async function fetchLastMatches(playerId, take = 5) {
-	return openDotaGet(`/players/${playerId}/matches?lobby_type=${LOBBY_TYPE_TURBO}&limit=${take}`);
+	const matches = await openDotaGet(`/players/${playerId}/recentMatches`);
+	return matches.filter(m => isTurbo(m)).slice(0, take);
 }
 
 async function fetchRecentMatches(playerId, take = 20) {
-	return openDotaGet(`/players/${playerId}/matches?lobby_type=${LOBBY_TYPE_TURBO}&limit=${take}`);
+	const matches = await openDotaGet(`/players/${playerId}/recentMatches`);
+	return matches.filter(m => isTurbo(m)).slice(0, take);
 }
 
 async function fetchMatchDetail(matchId) {
@@ -82,7 +88,8 @@ async function fetchLastMatchData(playerId) {
 
 async function fetchPeers(playerId, days) {
 	const dateParam = days ? `&date=${days}` : '';
-	return openDotaGet(`/players/${playerId}/peers?lobby_type=${LOBBY_TYPE_TURBO}${dateParam}`);
+	const peers = await openDotaGet(`/players/${playerId}/peers?${TURBO_FILTER}${dateParam}`);
+	return peers;
 }
 
 async function fetchHeroes() {

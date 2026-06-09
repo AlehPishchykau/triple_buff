@@ -9,10 +9,8 @@ const PLAYERS_IDS = [
 ];
 
 const OPENDOTA_API_URL = 'https://api.opendota.com/api';
-const LOBBY_TYPE_TURBO = 7;
 
 module.exports = {
 	PLAYERS_IDS,
-	OPENDOTA_API_URL,
-	LOBBY_TYPE_TURBO
+	OPENDOTA_API_URL
 };
