@@ -483,10 +483,17 @@ async function sendHeroesStats(ctx) {
 	const playerStats = responses.map((heroPerf, index) => {
 		const name = playersMap[playerIds[index]].name;
 		if (!heroPerf || !heroPerf.length) return `<b>${name}</b>: нет данных`;
-		const sorted = heroPerf.sort((a, b) => b.matchCount - a.matchCount).slice(0, 3);
+		const minGames = 5;
+		const withEnoughGames = heroPerf.filter(h => h.matchCount >= minGames);
+		const pool = withEnoughGames.length >= 3 ? withEnoughGames : heroPerf;
+		const sorted = pool.sort((a, b) => {
+			const wrA = a.winCount / a.matchCount;
+			const wrB = b.winCount / b.matchCount;
+			return wrB - wrA || b.matchCount - a.matchCount;
+		}).slice(0, 3);
 		const heroLines = sorted.map((h, i) => {
 			const wr = ((h.winCount / h.matchCount) * 100).toFixed(1);
-			return `  ${i + 1}. ${heroes[h.heroId]?.displayName || '???'} — ${h.matchCount} игр, ${wr}%`;
+			return `  ${i + 1}. ${heroes[h.heroId]?.displayName || '???'} — ${wr}% (${h.matchCount} игр)`;
 		}).join('\n');
 		return `<b>${name}</b>\n${heroLines}`;
 	});
