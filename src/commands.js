@@ -52,13 +52,21 @@ async function sendPlayersWinrate(ctx, period = 'allTime') {
 	const periodString = period === 'allTime' ? 'All time' : 'Last month';
 	const players = Object.values(playersMap);
 
-	const playersStats = response.map((matches, index) => {
-		const turboMatchesStats = matches[period].gameModeMatches.find((matchesByGameMode) => matchesByGameMode.id === TURBO_ID);
+	const playersStats = response.map((playerData, index) => {
+		const turboStats = playerData[period];
+		const turboMatchesStats = turboStats.find((m) => m.gameMode === TURBO_ID);
+
+		if (!turboMatchesStats || turboMatchesStats.matchCount === 0) {
+			return `
+			<b>${players[index].name}</b>
+			No turbo matches
+		`;
+		}
 
 		return `
 			<b>${players[index].name}</b>
 			Matches: ${turboMatchesStats.matchCount}
-			Winrate: ${(turboMatchesStats.win / turboMatchesStats.matchCount * 100).toFixed(1)}%
+			Winrate: ${(turboMatchesStats.winCount / turboMatchesStats.matchCount * 100).toFixed(1)}%
 		`;
 	})
 
@@ -74,10 +82,22 @@ async function sendPlayersWinrate(ctx, period = 'allTime') {
 
 async function sendPlayerWinrate(ctx, playerId, period = 'allTime') {
 	const players = await storage.getPlayers();
-	const matches = await fetchPlayerMatchesStats(playerId);
-	const turboMatchesStats = matches[period].gameModeMatches.find((matchesByGameMode) => matchesByGameMode.id === TURBO_ID);
+	const playerData = await fetchPlayerMatchesStats(playerId);
+	const turboStats = playerData[period];
+	const turboMatchesStats = turboStats.find((m) => m.gameMode === TURBO_ID);
 
 	if (!players[playerId]) {
+		return;
+	}
+
+	if (!turboMatchesStats || turboMatchesStats.matchCount === 0) {
+		const message = `
+		<blockquote>
+		<b>${players[playerId].name}</b>
+		No turbo matches found
+		</blockquote>
+	`;
+		await ctx.replyWithHTML(message);
 		return;
 	}
 
@@ -88,7 +108,7 @@ async function sendPlayerWinrate(ctx, playerId, period = 'allTime') {
 		<b>${players[playerId].name}</b>
 
 		${periodString} turbo matches: ${turboMatchesStats.matchCount}
-		Winrate: ${(turboMatchesStats.win / turboMatchesStats.matchCount * 100).toFixed(1)}%
+		Winrate: ${(turboMatchesStats.winCount / turboMatchesStats.matchCount * 100).toFixed(1)}%
 		</blockquote>
 	`;
 
@@ -113,7 +133,7 @@ async function sendLastMatchStats(ctx, playerId) {
 		${(new Date(lastMatchData.startDateTime * 1000)).toLocaleString('ru-RU', { timeZone: 'UTC' })} (UTC)
 
 		Duration: ${secondsToTime(lastMatchData.durationSeconds)}
-		KDA: ${lastMatchPlayerData.numKills} - ${lastMatchPlayerData.numDeaths} - ${lastMatchPlayerData.numAssists}
+		KDA: ${lastMatchPlayerData.kills} - ${lastMatchPlayerData.deaths} - ${lastMatchPlayerData.assists}
 		Networth: ${lastMatchPlayerData.networth}
 		Level: ${lastMatchPlayerData.level}
 
@@ -132,6 +152,9 @@ async function sendLastPlayTime(ctx) {
 	const players = Object.values(playersMap);
 
 	const timeStats = response.map((matchData, index) => {
+		if (!matchData) {
+			return `${players[index].name}: no matches found`;
+		}
 		const time = Date.now() - (matchData.endDateTime * 1000);
 
 		return `${players[index].name}: ${convertMiliseconds(time)}`;
@@ -180,9 +203,9 @@ function parseMatchesData(matchesByPlayer) {
 			const player = match.players[0];
 			const {
 				steamAccountId,
-				numKills,
-				numDeaths,
-				numAssists,
+				kills,
+				deaths,
+				assists,
 				goldPerMinute,
           		experiencePerMinute,
 				networth,
@@ -208,7 +231,7 @@ function parseMatchesData(matchesByPlayer) {
 				result.summary.loses[match.id] = true;
 			}
 
-			result.players[steamAccountId].kdas.push((numKills + numAssists) / (numDeaths || 1));
+			result.players[steamAccountId].kdas.push((kills + assists) / (deaths || 1));
 			result.players[steamAccountId].gpms.push(goldPerMinute);
 			result.players[steamAccountId].xpms.push(experiencePerMinute);
 			result.players[steamAccountId].nws.push(networth);

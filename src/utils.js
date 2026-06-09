@@ -1,25 +1,32 @@
 require('dotenv').config();
 const fs = require('node:fs');
 
-const { STRATZ_API_URL } = require('./constants');
+const { STRATZ_GRAPHQL_URL } = require('./constants');
 const { STRATZ_TOKEN } = process.env;
 
-async function request(path, params) {
-	return await fetch(STRATZ_API_URL + path + getParamsString(params), {
-		headers: { Authorization: `Bearer ${STRATZ_TOKEN}` }
-	})
-}
-
-function getParamsString(params = {}) {
-	const paramsArray = [];
-
-	Object.entries(params).forEach(([key, value]) => {
-		paramsArray.push(`${key}=${value}`);
+async function graphqlRequest(query, variables = {}) {
+	const response = await fetch(STRATZ_GRAPHQL_URL, {
+		method: 'POST',
+		headers: {
+			'Authorization': `Bearer ${STRATZ_TOKEN}`,
+			'Content-Type': 'application/json',
+			'User-Agent': 'STRATZ_API'
+		},
+		body: JSON.stringify({ query, variables })
 	});
 
-	const paramsString = paramsArray.join('&');
+	if (!response.ok) {
+		throw new Error(`GraphQL request failed: ${response.status} ${response.statusText}`);
+	}
 
-	return paramsString ? `?${paramsString}` : '';
+	const result = await response.json();
+
+	if (result.errors) {
+		console.error('GraphQL errors:', JSON.stringify(result.errors));
+		throw new Error(`GraphQL errors: ${result.errors.map(e => e.message).join(', ')}`);
+	}
+
+	return result.data;
 }
 
 function secondsToTime(totalSeconds) {
@@ -68,7 +75,7 @@ function writeJSONToFile(data) {
 }
 
 module.exports = {
-	request,
+	graphqlRequest,
 	secondsToTime,
 	convertMiliseconds,
 	writeJSONToFile

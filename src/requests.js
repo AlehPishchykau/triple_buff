@@ -1,84 +1,190 @@
 const { PLAYERS_IDS, TURBO_ID } = require('./constants');
-const { request } = require('./utils');
+const { graphqlRequest } = require('./utils');
 
 async function fetchMatchesData() {
 	const startDateTime = Math.round(Date.now() / 1000 - 86400);
-	const matchesRequests = [];
 
-	PLAYERS_IDS.forEach((playerId) => {
-		const matchesRequest = request(`Player/${playerId}/matches`, {
-			startDateTime
-		});
+	const playerQueries = PLAYERS_IDS.map((id, index) => `
+		p${index}: player(steamAccountId: ${id}) {
+			matches(request: { startDateTime: ${startDateTime} }) {
+				id
+				durationSeconds
+				startDateTime
+				endDateTime
+				gameMode
+				players(steamAccountId: ${id}) {
+					steamAccountId
+					kills
+					deaths
+					assists
+					goldPerMinute
+					experiencePerMinute
+					networth
+					isVictory
+					heroId
+					heroDamage
+					towerDamage
+					level
+				}
+			}
+		}
+	`).join('\n');
 
-		matchesRequests.push(matchesRequest);
-	})
+	const data = await graphqlRequest(`{ ${playerQueries} }`);
 
-	const responses = await Promise.all(matchesRequests);
-	const result = await Promise.all(responses.map(response => response.json()));
-
-	return result;
+	return PLAYERS_IDS.map((_, index) => data[`p${index}`].matches);
 }
 
 async function fetchPlayersData() {
-	const playersRequests = [];
+	const playerQueries = PLAYERS_IDS.map((id, index) => `
+		p${index}: player(steamAccountId: ${id}) {
+			steamAccount {
+				id
+				name
+				avatar
+			}
+		}
+	`).join('\n');
 
-	PLAYERS_IDS.forEach((playerId) => {
-		const playerRequest = request(`Player/${playerId}`);
+	const data = await graphqlRequest(`{ ${playerQueries} }`);
 
-		playersRequests.push(playerRequest);
-	})
-
-	const responses = await Promise.all(playersRequests);
-	const playersData = await Promise.all(responses.map(response => response.json()));
-	const result = playersData.reduce((acc, value) => {
-		const { id, avatar, name } = value.steamAccount;
-
-		acc[id] = {
-			avatar,
-			name,
-		};
-
-		return acc;
-	}, {});
+	const result = {};
+	PLAYERS_IDS.forEach((_, index) => {
+		const { id, avatar, name } = data[`p${index}`].steamAccount;
+		result[id] = { avatar, name };
+	});
 
 	return result;
 }
 
 async function fetchPlayerData(playerId) {
-	const response = await request(`Player/${playerId}`);
+	const data = await graphqlRequest(`{
+		player(steamAccountId: ${playerId}) {
+			steamAccount {
+				id
+				name
+				avatar
+			}
+		}
+	}`);
 
-	return await response.json();
+	return data.player;
 }
 
 async function fetchLastMatchData(playerId, gameModeId) {
-	const response = await request(`Player/${playerId}/matches?take=1${gameModeId ? `&gameMode=${gameModeId}` : '' }`);
-	const matches = await response.json();
+	const gameModeFilter = gameModeId ? `gameModeIds: [${gameModeId}],` : '';
 
-	return matches[0];
+	const data = await graphqlRequest(`{
+		player(steamAccountId: ${playerId}) {
+			matches(request: { ${gameModeFilter} take: 1 }) {
+				id
+				durationSeconds
+				startDateTime
+				endDateTime
+				gameMode
+				players(steamAccountId: ${playerId}) {
+					steamAccountId
+					kills
+					deaths
+					assists
+					goldPerMinute
+					experiencePerMinute
+					networth
+					isVictory
+					heroId
+					heroDamage
+					towerDamage
+					level
+				}
+			}
+		}
+	}`);
+
+	const matches = data.player.matches;
+	return matches.length > 0 ? matches[0] : null;
 }
 
 async function fetchPlayerMatchesStats(playerId) {
-	const response = await request(`Player/${playerId}/summary`);
+	const oneMonthAgo = Math.round(Date.now() / 1000 - 30 * 86400);
 
-	return await response.json();
+	const data = await graphqlRequest(`{
+		player(steamAccountId: ${playerId}) {
+			allTime: matchesGroupBy(request: { 
+				playerList: SINGLE,
+				groupBy: GAME_MODE,
+				gameModeIds: [${TURBO_ID}]
+			}) {
+				... on MatchGroupByGameModeType {
+					gameMode
+					matchCount
+					winCount
+				}
+			}
+			oneMonth: matchesGroupBy(request: { 
+				playerList: SINGLE,
+				groupBy: GAME_MODE,
+				gameModeIds: [${TURBO_ID}],
+				startDateTime: ${oneMonthAgo}
+			}) {
+				... on MatchGroupByGameModeType {
+					gameMode
+					matchCount
+					winCount
+				}
+			}
+		}
+	}`);
+
+	return data.player;
 }
 
 async function fetchPlayerHeroesStats(playerId) {
-	const response = await request(`Player/${playerId}/heroPerformance?gameMode=23`);
+	const data = await graphqlRequest(`{
+		player(steamAccountId: ${playerId}) {
+			heroesPerformance(request: { gameModeIds: [${TURBO_ID}] }) {
+				heroId
+				matchCount
+				winCount
+			}
+		}
+	}`);
 
-	return await response.json();
+	return data.player.heroesPerformance;
 }
 
 async function fetchGameModes() {
-	const response = await request(`GameMode`);
+	const data = await graphqlRequest(`{
+		constants {
+			gameModes {
+				id
+				name
+			}
+		}
+	}`);
 
-	return await response.json();
+	const result = {};
+	data.constants.gameModes.forEach(mode => {
+		result[mode.id] = mode;
+	});
+	return result;
 }
 
 async function fetchHeroes() {
-	const response = await request(`Hero`);
+	const data = await graphqlRequest(`{
+		constants {
+			heroes(language: ENGLISH) {
+				id
+				displayName
+				shortName
+			}
+		}
+	}`);
 
-	return await response.json();
+	const result = {};
+	data.constants.heroes.forEach(hero => {
+		result[hero.id] = hero;
+	});
+	return result;
 }
 
 module.exports = {
