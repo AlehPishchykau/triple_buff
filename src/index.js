@@ -114,6 +114,7 @@ bot.action(/wr_period:(.+)/, async (ctx) => {
 		);
 	} catch (err) {
 		console.log('wr_period error:', err.message);
+		try { await ctx.replyWithHTML(`<blockquote>Ошибка: ${err.message}</blockquote>`); } catch (_) {}
 	}
 });
 
@@ -130,6 +131,7 @@ bot.action(/wr_player:(.+):(.+)/, async (ctx) => {
 		}
 	} catch (err) {
 		console.log('wr_player error:', err.message);
+		try { await ctx.replyWithHTML(`<blockquote>Ошибка: ${err.message}</blockquote>`); } catch (_) {}
 	}
 });
 
@@ -142,6 +144,7 @@ bot.action(/match:(\d+):(\d+)/, async (ctx) => {
 		await sendMatchDetails(ctx, matchId, playerId);
 	} catch (err) {
 		console.log('match error:', err.message);
+		try { await ctx.replyWithHTML(`<blockquote>Ошибка: ${err.message}</blockquote>`); } catch (_) {}
 	}
 });
 
@@ -166,8 +169,11 @@ if (CHAT_ID) {
 	});
 }
 
-bot.catch((err, ctx) => {
+bot.catch(async (err, ctx) => {
 	console.error(`Error for ${ctx.updateType}:`, err.message);
+	try {
+		await ctx.replyWithHTML(`<blockquote>Ошибка: ${err.message}</blockquote>`);
+	} catch (_) {}
 });
 
 bot.launch();

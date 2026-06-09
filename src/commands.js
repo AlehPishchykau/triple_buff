@@ -49,7 +49,7 @@ async function sendReport(ctx, period = 'yesterday') {
 			const wr = ((top.winCount / top.matchCount) * 100).toFixed(1);
 			return `<b>${name}</b>: ${hero} (${top.matchCount} игр, ${wr}%)`;
 		});
-		await ctx.replyWithHTML(`<blockquote><b>Любимые герои</b>\n${lines.join('\n')}</blockquote>`);
+		await ctx.replyWithHTML(`<blockquote><b>Любимые герои (за все время)</b>\n${lines.join('\n')}</blockquote>`);
 	}
 }
 
@@ -491,7 +491,7 @@ async function sendHeroesStats(ctx) {
 		return `<b>${name}</b>\n${heroLines}`;
 	});
 
-	await ctx.replyWithHTML(`<blockquote><b>Топ-3 героев (турбо)</b>\n\n${playerStats.join('\n\n')}</blockquote>`);
+	await ctx.replyWithHTML(`<blockquote><b>Топ-3 героев в турбо (за все время)</b>\n\n${playerStats.join('\n\n')}</blockquote>`);
 }
 
 async function sendStreaks(ctx) {
@@ -517,7 +517,7 @@ async function sendStreaks(ctx) {
 		return `${emoji} ${name}: ${count} ${type} подряд`;
 	});
 
-	await ctx.replyWithHTML(`<blockquote><b>Текущие серии</b>\n\n${streakLines.join('\n')}</blockquote>`);
+	await ctx.replyWithHTML(`<blockquote><b>Текущие серии (последние 20 матчей)</b>\n\n${streakLines.join('\n')}</blockquote>`);
 }
 
 async function sendPartyStats(ctx) {

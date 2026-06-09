@@ -145,10 +145,11 @@ async function fetchPlayerMatchesStats(playerId) {
 
 	const data = await graphqlRequest(`{
 		player(steamAccountId: ${playerId}) {
-			allTime: matchesGroupBy(request: { 
+			allTime: matchesGroupBy(request: {
 				playerList: SINGLE,
 				groupBy: GAME_MODE,
-				gameModeIds: [${TURBO_ID}]
+				gameModeIds: [${TURBO_ID}],
+				take: 5000
 			}) {
 				... on MatchGroupByGameModeType {
 					gameMode
@@ -156,11 +157,12 @@ async function fetchPlayerMatchesStats(playerId) {
 					winCount
 				}
 			}
-			oneMonth: matchesGroupBy(request: { 
+			oneMonth: matchesGroupBy(request: {
 				playerList: SINGLE,
 				groupBy: GAME_MODE,
 				gameModeIds: [${TURBO_ID}],
-				startDateTime: ${oneMonthAgo}
+				startDateTime: ${oneMonthAgo},
+				take: 500
 			}) {
 				... on MatchGroupByGameModeType {
 					gameMode
