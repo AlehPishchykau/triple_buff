@@ -1,278 +1,119 @@
-const { PLAYERS_IDS, TURBO_ID } = require('./constants');
-const { graphqlRequest } = require('./utils');
+const { PLAYERS_IDS, LOBBY_TYPE_TURBO } = require('./constants');
+const { openDotaGet, openDotaPost, isTurbo } = require('./utils');
+
+async function refreshPlayers() {
+	await Promise.all(
+		PLAYERS_IDS.map(id => openDotaPost(`/players/${id}/refresh`))
+	);
+}
 
 async function fetchMatchesData(period = 'yesterday') {
-	const periods = {
-		yesterday: 86400,
-		today: 2 * 86400,
-		week: 7 * 86400,
-	};
-	const startDateTime = Math.round(Date.now() / 1000 - (periods[period] || 86400));
-	const takeLimits = { yesterday: 25, today: 50, week: 100 };
-	const take = takeLimits[period] || 25;
+	const periods = { yesterday: 1, today: 2, week: 7 };
+	const days = periods[period] || 1;
+	const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
 
-	const playerQueries = PLAYERS_IDS.map((id, index) => `
-		p${index}: player(steamAccountId: ${id}) {
-			matches(request: { startDateTime: ${startDateTime}, take: ${take} }) {
-				id
-				durationSeconds
-				startDateTime
-				endDateTime
-				gameMode
-				players(steamAccountId: ${id}) {
-					steamAccountId
-					kills
-					deaths
-					assists
-					goldPerMinute
-					experiencePerMinute
-					networth
-					isVictory
-					heroId
-					heroDamage
-					towerDamage
-					level
-				}
-			}
-		}
-	`).join('\n');
+	const results = await Promise.all(
+		PLAYERS_IDS.map(id => openDotaGet(`/players/${id}/recentMatches`))
+	);
 
-	const data = await graphqlRequest(`{ ${playerQueries} }`);
-
-	return PLAYERS_IDS.map((_, index) => data[`p${index}`].matches);
+	return results.map((matches, idx) =>
+		matches
+			.filter(m => isTurbo(m) && m.start_time >= cutoff)
+			.map(m => ({ ...m, steamAccountId: PLAYERS_IDS[idx] }))
+	);
 }
 
 async function fetchPlayersData() {
-	const playerQueries = PLAYERS_IDS.map((id, index) => `
-		p${index}: player(steamAccountId: ${id}) {
-			steamAccount {
-				id
-				name
-				avatar
-			}
-		}
-	`).join('\n');
+	const results = await Promise.all(
+		PLAYERS_IDS.map(id => openDotaGet(`/players/${id}`))
+	);
 
-	const data = await graphqlRequest(`{ ${playerQueries} }`);
-
-	const result = {};
-	PLAYERS_IDS.forEach((_, index) => {
-		const { id, avatar, name } = data[`p${index}`].steamAccount;
-		result[id] = { avatar, name };
+	const data = {};
+	results.forEach(player => {
+		const p = player.profile;
+		data[p.account_id] = { name: p.personaname, avatar: p.avatarfull };
 	});
-
-	return result;
+	return data;
 }
 
 async function fetchPlayerData(playerId) {
-	const data = await graphqlRequest(`{
-		player(steamAccountId: ${playerId}) {
-			steamAccount {
-				id
-				name
-				avatar
-			}
-		}
-	}`);
-
-	return data.player;
-}
-
-async function fetchLastMatchData(playerId, gameModeId) {
-	const gameModeFilter = gameModeId ? `gameModeIds: [${gameModeId}],` : '';
-
-	const data = await graphqlRequest(`{
-		player(steamAccountId: ${playerId}) {
-			matches(request: { ${gameModeFilter} take: 1 }) {
-				id
-				durationSeconds
-				startDateTime
-				endDateTime
-				gameMode
-				players(steamAccountId: ${playerId}) {
-					steamAccountId
-					kills
-					deaths
-					assists
-					goldPerMinute
-					experiencePerMinute
-					networth
-					isVictory
-					heroId
-					heroDamage
-					towerDamage
-					level
-				}
-			}
-		}
-	}`);
-
-	const matches = data.player.matches;
-	return matches.length > 0 ? matches[0] : null;
-}
-
-async function fetchLastMatches(playerId, take = 10) {
-	const data = await graphqlRequest(`{
-		player(steamAccountId: ${playerId}) {
-			matches(request: { gameModeIds: [${TURBO_ID}], take: ${take} }) {
-				id
-				durationSeconds
-				startDateTime
-				endDateTime
-				gameMode
-				players(steamAccountId: ${playerId}) {
-					steamAccountId
-					kills
-					deaths
-					assists
-					goldPerMinute
-					experiencePerMinute
-					networth
-					isVictory
-					heroId
-					heroDamage
-					towerDamage
-					level
-				}
-			}
-		}
-	}`);
-	return data.player.matches;
+	const player = await openDotaGet(`/players/${playerId}`);
+	const p = player.profile;
+	return { name: p.personaname, avatar: p.avatarfull };
 }
 
 async function fetchPlayerMatchesStats(playerId) {
-	const oneMonthAgo = Math.round(Date.now() / 1000 - 30 * 86400);
+	const [allTime, oneMonth] = await Promise.all([
+		openDotaGet(`/players/${playerId}/wl?lobby_type=${LOBBY_TYPE_TURBO}`),
+		openDotaGet(`/players/${playerId}/wl?lobby_type=${LOBBY_TYPE_TURBO}&date=30`),
+	]);
 
-	const data = await graphqlRequest(`{
-		player(steamAccountId: ${playerId}) {
-			allTime: matchesGroupBy(request: {
-				playerList: SINGLE,
-				groupBy: GAME_MODE,
-				gameModeIds: [${TURBO_ID}],
-				take: 5000
-			}) {
-				... on MatchGroupByGameModeType {
-					gameMode
-					matchCount
-					winCount
-				}
-			}
-			oneMonth: matchesGroupBy(request: {
-				playerList: SINGLE,
-				groupBy: GAME_MODE,
-				gameModeIds: [${TURBO_ID}],
-				startDateTime: ${oneMonthAgo},
-				take: 500
-			}) {
-				... on MatchGroupByGameModeType {
-					gameMode
-					matchCount
-					winCount
-				}
-			}
-		}
-	}`);
-
-	return data.player;
+	return {
+		allTime: { matchCount: allTime.win + allTime.lose, winCount: allTime.win },
+		oneMonth: { matchCount: oneMonth.win + oneMonth.lose, winCount: oneMonth.win },
+	};
 }
 
 async function fetchPlayerHeroesStats(playerId) {
-	const data = await graphqlRequest(`{
-		player(steamAccountId: ${playerId}) {
-			heroesPerformance(request: { gameModeIds: [${TURBO_ID}], take: 5000 }) {
-				heroId
-				matchCount
-				winCount
-			}
-		}
-	}`);
-
-	return data.player.heroesPerformance;
+	const heroes = await openDotaGet(`/players/${playerId}/heroes?lobby_type=${LOBBY_TYPE_TURBO}`);
+	return heroes.map(h => ({
+		heroId: Number(h.hero_id),
+		matchCount: h.games,
+		winCount: h.win,
+	}));
 }
 
-async function fetchGameModes() {
-	const data = await graphqlRequest(`{
-		constants {
-			gameModes {
-				id
-				name
-			}
-		}
-	}`);
-
-	const result = {};
-	data.constants.gameModes.forEach(mode => {
-		result[mode.id] = mode;
-	});
-	return result;
-}
-
-async function fetchHeroes() {
-	const data = await graphqlRequest(`{
-		constants {
-			heroes(language: ENGLISH) {
-				id
-				displayName
-				shortName
-			}
-		}
-	}`);
-
-	const result = {};
-	data.constants.heroes.forEach(hero => {
-		result[hero.id] = hero;
-	});
-	return result;
+async function fetchLastMatches(playerId, take = 5) {
+	return openDotaGet(`/players/${playerId}/matches?lobby_type=${LOBBY_TYPE_TURBO}&limit=${take}`);
 }
 
 async function fetchRecentMatches(playerId, take = 20) {
-	const data = await graphqlRequest(`{
-		player(steamAccountId: ${playerId}) {
-			matches(request: { gameModeIds: [${TURBO_ID}], take: ${take} }) {
-				id
-				startDateTime
-				players(steamAccountId: ${playerId}) {
-					isVictory
-				}
-			}
-		}
-	}`);
-	return data.player.matches;
+	return openDotaGet(`/players/${playerId}/matches?lobby_type=${LOBBY_TYPE_TURBO}&limit=${take}`);
 }
 
-async function fetchRecentMatchesDetailed(playerId, take = 20) {
-	const oneWeekAgo = Math.round(Date.now() / 1000 - 7 * 86400);
-	const data = await graphqlRequest(`{
-		player(steamAccountId: ${playerId}) {
-			matches(request: { gameModeIds: [${TURBO_ID}], startDateTime: ${oneWeekAgo}, take: ${take} }) {
-				id
-				durationSeconds
-				startDateTime
-				players(steamAccountId: ${playerId}) {
-					steamAccountId
-					kills
-					deaths
-					assists
-					networth
-					isVictory
-					heroId
-				}
-			}
-		}
-	}`);
-	return data.player.matches;
+async function fetchMatchDetail(matchId) {
+	return openDotaGet(`/matches/${matchId}`);
+}
+
+async function fetchLastMatchData(playerId) {
+	const matches = await openDotaGet(`/players/${playerId}/recentMatches`);
+	return matches.length > 0 ? matches[0] : null;
+}
+
+async function fetchPeers(playerId, days) {
+	const dateParam = days ? `&date=${days}` : '';
+	return openDotaGet(`/players/${playerId}/peers?lobby_type=${LOBBY_TYPE_TURBO}${dateParam}`);
+}
+
+async function fetchHeroes() {
+	const heroes = await openDotaGet('/constants/heroes');
+	const result = {};
+	Object.values(heroes).forEach(hero => {
+		result[hero.id] = {
+			id: hero.id,
+			displayName: hero.localized_name,
+			shortName: hero.name.replace('npc_dota_hero_', ''),
+		};
+	});
+	return result;
+}
+
+async function fetchGameModes() {
+	return openDotaGet('/constants/game_mode');
 }
 
 module.exports = {
+	refreshPlayers,
 	fetchMatchesData,
 	fetchPlayersData,
 	fetchPlayerData,
-	fetchLastMatchData,
-	fetchLastMatches,
 	fetchPlayerMatchesStats,
 	fetchPlayerHeroesStats,
+	fetchLastMatches,
 	fetchRecentMatches,
-	fetchRecentMatchesDetailed,
-	fetchGameModes,
-	fetchHeroes
+	fetchMatchDetail,
+	fetchLastMatchData,
+	fetchPeers,
+	fetchHeroes,
+	fetchGameModes
 };

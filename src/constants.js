@@ -8,11 +8,11 @@ const PLAYERS_IDS = [
 	129638532, // Blink
 ];
 
-const STRATZ_GRAPHQL_URL = 'https://api.stratz.com/graphql';
-const TURBO_ID = 23;
+const OPENDOTA_API_URL = 'https://api.opendota.com/api';
+const LOBBY_TYPE_TURBO = 7;
 
 module.exports = {
 	PLAYERS_IDS,
-	STRATZ_GRAPHQL_URL,
-	TURBO_ID
+	OPENDOTA_API_URL,
+	LOBBY_TYPE_TURBO
 };

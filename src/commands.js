@@ -1,16 +1,17 @@
-const { TURBO_ID, PLAYERS_IDS } = require('./constants');
+const { PLAYERS_IDS } = require('./constants');
 const {
 	fetchMatchesData,
 	fetchPlayersData,
 	fetchPlayerMatchesStats,
 	fetchPlayerHeroesStats,
-	fetchLastMatchData,
 	fetchLastMatches,
 	fetchRecentMatches,
-	fetchRecentMatchesDetailed
+	fetchMatchDetail,
+	fetchLastMatchData,
+	fetchPeers,
 } = require('./requests');
 const { storage } = require('./storage');
-const { secondsToTime, convertMiliseconds } = require('./utils');
+const { secondsToTime, convertMiliseconds, isWin } = require('./utils');
 
 const PERIOD_LABELS = {
 	yesterday: 'Вчерашние матчи',
@@ -61,7 +62,7 @@ async function sendMVP(ctx, mvp) {
 	const message = `
 		<blockquote>
 		<b>MVP - ${mvp.name}</b>
-		WL: ${mvp.wins} - ${mvp.loses} 
+		WL: ${mvp.wins} - ${mvp.loses}
 		Avg KDA: ${mvp.kdaAvg.toFixed(1)}
 		Avg Networth: ${mvp.nwAvg.toFixed(0)}
 		</blockquote>
@@ -76,19 +77,15 @@ async function sendMVP(ctx, mvp) {
 
 async function sendPlayersWinrate(ctx, period = 'allTime') {
 	const playersMap = await storage.getPlayers();
-	const requests = Object.keys(playersMap).map((playerId) => {
-		return fetchPlayerMatchesStats(playerId);
-	});
-
+	const requests = Object.keys(playersMap).map(id => fetchPlayerMatchesStats(id));
 	const response = await Promise.all(requests);
 	const periodString = period === 'allTime' ? 'All time' : 'Last month';
 	const players = Object.values(playersMap);
 
-	const playersStats = response.map((playerData, index) => {
-		const turboStats = playerData[period];
-		const turboMatchesStats = turboStats.find((m) => m.gameMode === TURBO_ID);
+	const playersStats = response.map((stats, index) => {
+		const turboStats = stats[period];
 
-		if (!turboMatchesStats || turboMatchesStats.matchCount === 0) {
+		if (!turboStats || turboStats.matchCount === 0) {
 			return `
 			<b>${players[index].name}</b>
 			No turbo matches
@@ -97,8 +94,8 @@ async function sendPlayersWinrate(ctx, period = 'allTime') {
 
 		return `
 			<b>${players[index].name}</b>
-			Matches: ${turboMatchesStats.matchCount}
-			Winrate: ${(turboMatchesStats.winCount / turboMatchesStats.matchCount * 100).toFixed(1)}%
+			Matches: ${turboStats.matchCount}
+			Winrate: ${(turboStats.winCount / turboStats.matchCount * 100).toFixed(1)}%
 		`;
 	})
 
@@ -114,15 +111,14 @@ async function sendPlayersWinrate(ctx, period = 'allTime') {
 
 async function sendPlayerWinrate(ctx, playerId, period = 'allTime') {
 	const players = await storage.getPlayers();
-	const playerData = await fetchPlayerMatchesStats(playerId);
-	const turboStats = playerData[period];
-	const turboMatchesStats = turboStats.find((m) => m.gameMode === TURBO_ID);
+	const stats = await fetchPlayerMatchesStats(playerId);
+	const turboStats = stats[period];
 
 	if (!players[playerId]) {
 		return;
 	}
 
-	if (!turboMatchesStats || turboMatchesStats.matchCount === 0) {
+	if (!turboStats || turboStats.matchCount === 0) {
 		const message = `
 		<blockquote>
 		<b>${players[playerId].name}</b>
@@ -139,8 +135,8 @@ async function sendPlayerWinrate(ctx, playerId, period = 'allTime') {
 		<blockquote>
 		<b>${players[playerId].name}</b>
 
-		${periodString} turbo matches: ${turboMatchesStats.matchCount}
-		Winrate: ${(turboMatchesStats.winCount / turboMatchesStats.matchCount * 100).toFixed(1)}%
+		${periodString} turbo matches: ${turboStats.matchCount}
+		Winrate: ${(turboStats.winCount / turboStats.matchCount * 100).toFixed(1)}%
 		</blockquote>
 	`;
 
@@ -150,27 +146,23 @@ async function sendPlayerWinrate(ctx, playerId, period = 'allTime') {
 async function sendLastMatchStats(ctx, playerId) {
 	const players = await storage.getPlayers();
 	const heroes = await storage.getHeroes();
-	const lastMatchData = await fetchLastMatchData(playerId, TURBO_ID);
+	const matches = await fetchLastMatches(playerId, 1);
 
-	if (!lastMatchData || !players[playerId]) {
+	if (!matches.length || !players[playerId]) {
 		return;
 	}
 
-	const lastMatchPlayerData = lastMatchData.players[0];
-	const hero = heroes[lastMatchPlayerData.heroId];
+	const match = matches[0];
+	const won = isWin(match);
+	const hero = heroes[match.hero_id];
 
 	const message = `
 		<blockquote>
-		<b>${players[playerId].name}</b> <a href="https://www.dotabuff.com/matches/${lastMatchData.id}">${lastMatchPlayerData.isVictory ? 'won' : 'lost'} last match on ${hero.displayName}</a>
-		${(new Date(lastMatchData.startDateTime * 1000)).toLocaleString('ru-RU', { timeZone: 'UTC' })} (UTC)
+		<b>${players[playerId].name}</b> <a href="https://www.dotabuff.com/matches/${match.match_id}">${won ? 'won' : 'lost'} last match on ${hero?.displayName || '???'}</a>
+		${(new Date(match.start_time * 1000)).toLocaleString('ru-RU', { timeZone: 'UTC' })} (UTC)
 
-		Duration: ${secondsToTime(lastMatchData.durationSeconds)}
-		KDA: ${lastMatchPlayerData.kills} - ${lastMatchPlayerData.deaths} - ${lastMatchPlayerData.assists}
-		Networth: ${lastMatchPlayerData.networth}
-		Level: ${lastMatchPlayerData.level}
-
-		Hero DMG: ${lastMatchPlayerData.heroDamage}
-		Tower DMG: ${lastMatchPlayerData.towerDamage}
+		Duration: ${secondsToTime(match.duration)}
+		KDA: ${match.kills} - ${match.deaths} - ${match.assists}
 		</blockquote>
 	`;
 
@@ -187,17 +179,16 @@ async function sendLastMatchesList(ctx) {
 	responses.forEach((matches, idx) => {
 		if (!matches) return;
 		matches.forEach(match => {
-			const player = match.players[0];
 			allMatches.push({
-				matchId: match.id,
+				matchId: match.match_id,
 				playerId: playerIds[idx],
 				playerName: playersMap[playerIds[idx]].name,
-				heroName: heroes[player.heroId]?.displayName || '???',
-				isVictory: player.isVictory,
-				kills: player.kills,
-				deaths: player.deaths,
-				assists: player.assists,
-				startDateTime: match.startDateTime,
+				heroName: heroes[match.hero_id]?.displayName || '???',
+				isVictory: isWin(match),
+				kills: match.kills,
+				deaths: match.deaths,
+				assists: match.assists,
+				startDateTime: match.start_time,
 			});
 		});
 	});
@@ -216,26 +207,28 @@ async function sendLastMatchesList(ctx) {
 async function sendMatchDetails(ctx, matchId, playerId) {
 	const players = await storage.getPlayers();
 	const heroes = await storage.getHeroes();
-	const matches = await fetchLastMatches(playerId, 20);
-	const match = matches.find(m => m.id === Number(matchId));
+	const match = await fetchMatchDetail(matchId);
 
 	if (!match || !players[playerId]) return;
 
-	const p = match.players[0];
-	const hero = heroes[p.heroId];
+	const p = match.players.find(pl => pl.account_id === Number(playerId));
+	if (!p) return;
+
+	const hero = heroes[p.hero_id];
+	const won = p.radiant_win === (p.player_slot < 128);
 
 	const message = `
 		<blockquote>
-		<b>${players[playerId].name}</b> <a href="https://www.dotabuff.com/matches/${match.id}">${p.isVictory ? 'won' : 'lost'} on ${hero?.displayName || '???'}</a>
-		${(new Date(match.startDateTime * 1000)).toLocaleString('ru-RU', { timeZone: 'UTC' })} (UTC)
+		<b>${players[playerId].name}</b> <a href="https://www.dotabuff.com/matches/${match.match_id}">${won ? 'won' : 'lost'} on ${hero?.displayName || '???'}</a>
+		${(new Date(match.start_time * 1000)).toLocaleString('ru-RU', { timeZone: 'UTC' })} (UTC)
 
-		Duration: ${secondsToTime(match.durationSeconds)}
+		Duration: ${secondsToTime(match.duration)}
 		KDA: ${p.kills} - ${p.deaths} - ${p.assists}
-		Networth: ${p.networth}
+		Networth: ${p.net_worth || p.total_gold || 'N/A'}
 		Level: ${p.level}
 
-		Hero DMG: ${p.heroDamage}
-		Tower DMG: ${p.towerDamage}
+		Hero DMG: ${p.hero_damage}
+		Tower DMG: ${p.tower_damage}
 		</blockquote>
 	`;
 
@@ -244,18 +237,18 @@ async function sendMatchDetails(ctx, matchId, playerId) {
 
 async function sendLastPlayTime(ctx) {
 	const playersMap = await storage.getPlayers();
-	const requests = Object.keys(playersMap).map((playerId) => fetchLastMatchData(playerId));
+	const requests = Object.keys(playersMap).map(id => fetchLastMatchData(id));
 	const response = await Promise.all(requests);
 	const players = Object.values(playersMap);
 
-	const timeStats = response.map((matchData, index) => {
-		if (!matchData) {
+	const timeStats = response.map((match, index) => {
+		if (!match) {
 			return `${players[index].name}: no matches found`;
 		}
-		const time = Date.now() - (matchData.endDateTime * 1000);
-
+		const endTime = (match.start_time + match.duration) * 1000;
+		const time = Date.now() - endTime;
 		return `${players[index].name}: ${convertMiliseconds(time)}`;
-	})
+	});
 
 	const message = `
 		<blockquote>
@@ -302,63 +295,49 @@ function parseMatchesData(matchesByPlayer) {
 	};
 
 	matchesByPlayer.forEach((playerMatches) => {
-		playerMatches.forEach((match) => {
-			const player = match.players[0];
-			const {
-				steamAccountId,
-				kills,
-				deaths,
-				assists,
-				goldPerMinute,
-          		experiencePerMinute,
-				networth,
-				isVictory,
-			} = player;
+		playerMatches.forEach((m) => {
+			const steamAccountId = m.steamAccountId;
+			const won = isWin(m);
+			const networth = Math.round(m.gold_per_min * m.duration / 60);
 
 			if (!result.players[steamAccountId]) {
 				result.players[steamAccountId] = {
-					wins: 0,
-					loses: 0,
-					kdas: [],
-					gpms: [],
-					xpms: [],
-					nws: []
+					wins: 0, loses: 0, kdas: [], gpms: [], xpms: [], nws: []
 				};
 			}
 
-			if (isVictory) {
+			if (won) {
 				result.players[steamAccountId].wins++;
-				result.summary.wins[match.id] = true;
+				result.summary.wins[m.match_id] = true;
 			} else {
 				result.players[steamAccountId].loses++;
-				result.summary.loses[match.id] = true;
+				result.summary.loses[m.match_id] = true;
 			}
 
-			result.players[steamAccountId].kdas.push((kills + assists) / (deaths || 1));
-			result.players[steamAccountId].gpms.push(goldPerMinute);
-			result.players[steamAccountId].xpms.push(experiencePerMinute);
+			result.players[steamAccountId].kdas.push((m.kills + m.assists) / (m.deaths || 1));
+			result.players[steamAccountId].gpms.push(m.gold_per_min);
+			result.players[steamAccountId].xpms.push(m.xp_per_min);
 			result.players[steamAccountId].nws.push(networth);
 
-			const heroId = player.heroId;
-			if (deaths > result.awards.feeder.value) {
-				result.awards.feeder = { steamAccountId, value: deaths, heroId };
+			if (m.deaths > result.awards.feeder.value) {
+				result.awards.feeder = { steamAccountId, value: m.deaths, heroId: m.hero_id };
 			}
-			if (goldPerMinute > result.awards.farmer.value) {
-				result.awards.farmer = { steamAccountId, value: goldPerMinute, heroId };
+			if (m.gold_per_min > result.awards.farmer.value) {
+				result.awards.farmer = { steamAccountId, value: m.gold_per_min, heroId: m.hero_id };
 			}
-			if (player.towerDamage > result.awards.destroyer.value) {
-				result.awards.destroyer = { steamAccountId, value: player.towerDamage, heroId };
+			if (m.tower_damage > result.awards.destroyer.value) {
+				result.awards.destroyer = { steamAccountId, value: m.tower_damage, heroId: m.hero_id };
 			}
 			if (networth > result.awards.carry.value) {
-				result.awards.carry = { steamAccountId, value: networth, heroId };
+				result.awards.carry = { steamAccountId, value: networth, heroId: m.hero_id };
 			}
 
-			if (match.durationSeconds > result.summary.longestMatchDuration) {
-				result.summary.longestMatchDuration = match.durationSeconds;
+			if (m.duration > result.summary.longestMatchDuration) {
+				result.summary.longestMatchDuration = m.duration;
 			}
 
-			if (match.durationSeconds < result.summary.shortestMatchDuration) {
-				result.summary.shortestMatchDuration = match.durationSeconds;
+			if (m.duration < result.summary.shortestMatchDuration) {
+				result.summary.shortestMatchDuration = m.duration;
 			}
 		});
 	});
@@ -510,10 +489,10 @@ async function sendStreaks(ctx) {
 		const name = playersMap[playerIds[index]].name;
 		if (!matches || !matches.length) return `${name}: нет матчей`;
 
-		const firstResult = matches[0].players[0].isVictory;
+		const firstResult = isWin(matches[0]);
 		let count = 0;
 		for (const match of matches) {
-			if (match.players[0].isVictory === firstResult) {
+			if (isWin(match) === firstResult) {
 				count++;
 			} else {
 				break;
@@ -529,69 +508,49 @@ async function sendStreaks(ctx) {
 
 async function sendPartyStats(ctx) {
 	const playersMap = await storage.getPlayers();
-	const heroes = await storage.getHeroes();
 	const playerIds = Object.keys(playersMap);
+	const trackedSet = new Set(playerIds.map(Number));
+
 	const responses = [];
 	for (const id of playerIds) {
 		try {
-			responses.push(await fetchRecentMatchesDetailed(id));
+			responses.push(await fetchPeers(id, 30));
 		} catch (_) {
 			responses.push([]);
 		}
 	}
 
-	const matchMap = {};
-	responses.forEach((matches, idx) => {
+	const pairStats = {};
+	responses.forEach((peers, idx) => {
 		const pid = playerIds[idx];
-		if (!matches) return;
-		matches.forEach(match => {
-			if (!matchMap[match.id]) {
-				matchMap[match.id] = { match, players: [] };
+		if (!peers) return;
+		peers.forEach(peer => {
+			if (trackedSet.has(peer.account_id)) {
+				const key = [pid, String(peer.account_id)].sort().join(':');
+				if (!pairStats[key]) {
+					pairStats[key] = { games: 0, wins: 0, players: [pid, String(peer.account_id)] };
+				}
+				pairStats[key].games = Math.max(pairStats[key].games, peer.games);
+				pairStats[key].wins = Math.max(pairStats[key].wins, peer.win);
 			}
-			matchMap[match.id].players.push({
-				playerId: pid,
-				data: match.players[0]
-			});
 		});
 	});
 
-	const partyMatches = Object.values(matchMap).filter(m => m.players.length >= 2);
+	const pairs = Object.values(pairStats).filter(p => p.games > 0).sort((a, b) => b.games - a.games);
 
-	if (!partyMatches.length) {
-		await ctx.replyWithHTML('<blockquote>Нет совместных матчей за последнюю неделю</blockquote>');
+	if (!pairs.length) {
+		await ctx.replyWithHTML('<blockquote>Нет совместных матчей в турбо за месяц</blockquote>');
 		return;
 	}
 
-	const totalGames = partyMatches.length;
-	const wins = partyMatches.filter(m => m.players[0].data.isVictory).length;
-	const winrate = ((wins / totalGames) * 100).toFixed(1);
-
-	const playerPartyStats = {};
-	partyMatches.forEach(pm => {
-		pm.players.forEach(p => {
-			if (!playerPartyStats[p.playerId]) {
-				playerPartyStats[p.playerId] = { games: 0, wins: 0 };
-			}
-			playerPartyStats[p.playerId].games++;
-			if (p.data.isVictory) playerPartyStats[p.playerId].wins++;
-		});
+	const lines = pairs.slice(0, 15).map(p => {
+		const name1 = playersMap[p.players[0]]?.name || p.players[0];
+		const name2 = playersMap[p.players[1]]?.name || p.players[1];
+		const wr = ((p.wins / p.games) * 100).toFixed(1);
+		return `${name1} + ${name2}: ${p.games} игр, ${wr}% WR`;
 	});
 
-	const lines = Object.entries(playerPartyStats)
-		.sort((a, b) => b[1].games - a[1].games)
-		.map(([pid, stats]) => {
-			const wr = ((stats.wins / stats.games) * 100).toFixed(1);
-			return `${playersMap[pid]?.name || pid}: ${stats.games} игр, ${wr}% WR`;
-		});
-
-	const message = `<blockquote><b>Совместные игры (неделя)</b>
-Всего: ${totalGames} игр
-Винрейт: ${winrate}%
-
-${lines.join('\n')}
-</blockquote>`;
-
-	await ctx.replyWithHTML(message);
+	await ctx.replyWithHTML(`<blockquote><b>Совместные игры в турбо (месяц)</b>\n\n${lines.join('\n')}</blockquote>`);
 }
 
 module.exports = {

@@ -16,6 +16,7 @@ const {
 	deleteMessage,
 	deleteAction,
 } = require('./commands');
+const { refreshPlayers } = require('./requests');
 const { storage } = require('./storage');
 const { TELEGRAM_BOT_TOKEN, CHAT_ID } = process.env;
 
@@ -164,6 +165,8 @@ bot.catch(async (err, ctx) => {
 		await ctx.replyWithHTML(`<blockquote>Ошибка: ${err.message}</blockquote>`);
 	} catch (_) {}
 });
+
+refreshPlayers().catch(err => console.error('Player refresh failed:', err.message));
 
 bot.launch();
 
