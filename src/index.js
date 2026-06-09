@@ -81,6 +81,11 @@ bot.command('streak', safeCommand((ctx) => sendStreaks(ctx)));
 bot.command('party', safeCommand((ctx) => sendPartyStats(ctx)));
 bot.command('week', safeCommand((ctx) => sendReport(ctx, 'week')));
 
+bot.command('all', safeCommand(async (ctx) => {
+	const { TELEGRAM_USERNAMES } = require('./constants');
+	await ctx.reply(TELEGRAM_USERNAMES.join(' '));
+}));
+
 bot.command('adios', async (ctx) => {
 	await deleteMessage(ctx);
 	ctx.replyWithVoice('BQACAgIAAxkBAAIBLWWpm5CuDGxJZe5dkFhVLCK-0k8KAAKyPgACgwVJSVAsluDHpCQlNAQ');
@@ -147,6 +152,7 @@ bot.telegram.setMyCommands([
 	{ command: 'party', description: 'Совместные игры' },
 	{ command: 'week', description: 'Недельный отчёт' },
 	{ command: 'time', description: 'Время без Dota 2' },
+	{ command: 'all', description: 'Позвать всех' },
 ]);
 
 if (CHAT_ID) {
