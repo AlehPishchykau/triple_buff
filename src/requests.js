@@ -8,10 +8,12 @@ async function fetchMatchesData(period = 'yesterday') {
 		week: 7 * 86400,
 	};
 	const startDateTime = Math.round(Date.now() / 1000 - (periods[period] || 86400));
+	const takeLimits = { yesterday: 25, today: 50, week: 100 };
+	const take = takeLimits[period] || 25;
 
 	const playerQueries = PLAYERS_IDS.map((id, index) => `
 		p${index}: player(steamAccountId: ${id}) {
-			matches(request: { startDateTime: ${startDateTime} }) {
+			matches(request: { startDateTime: ${startDateTime}, take: ${take} }) {
 				id
 				durationSeconds
 				startDateTime
