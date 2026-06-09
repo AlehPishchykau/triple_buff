@@ -166,6 +166,10 @@ if (CHAT_ID) {
 	});
 }
 
+bot.catch((err, ctx) => {
+	console.error(`Error for ${ctx.updateType}:`, err.message);
+});
+
 bot.launch();
 
 process.once('SIGINT', () => bot.stop('SIGINT'));

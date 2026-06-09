@@ -544,7 +544,7 @@ async function sendPartyStats(ctx) {
 	const partyMatches = Object.values(matchMap).filter(m => m.players.length >= 2);
 
 	if (!partyMatches.length) {
-		await ctx.replyWithHTML('<blockquote>Нет совместных матчей за последние 2 недели</blockquote>');
+		await ctx.replyWithHTML('<blockquote>Нет совместных матчей за последнюю неделю</blockquote>');
 		return;
 	}
 
@@ -570,7 +570,7 @@ async function sendPartyStats(ctx) {
 			return `${playersMap[pid]?.name || pid}: ${stats.games} игр, ${wr}% WR`;
 		});
 
-	const message = `<blockquote><b>Совместные игры (2 недели)</b>
+	const message = `<blockquote><b>Совместные игры (неделя)</b>
 Всего: ${totalGames} игр
 Винрейт: ${winrate}%
 

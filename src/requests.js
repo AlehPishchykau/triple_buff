@@ -238,11 +238,11 @@ async function fetchRecentMatches(playerId, take = 20) {
 	return data.player.matches;
 }
 
-async function fetchRecentMatchesDetailed(playerId, take = 50) {
-	const twoWeeksAgo = Math.round(Date.now() / 1000 - 14 * 86400);
+async function fetchRecentMatchesDetailed(playerId, take = 20) {
+	const oneWeekAgo = Math.round(Date.now() / 1000 - 7 * 86400);
 	const data = await graphqlRequest(`{
 		player(steamAccountId: ${playerId}) {
-			matches(request: { gameModeIds: [${TURBO_ID}], startDateTime: ${twoWeeksAgo}, take: ${take} }) {
+			matches(request: { gameModeIds: [${TURBO_ID}], startDateTime: ${oneWeekAgo}, take: ${take} }) {
 				id
 				durationSeconds
 				startDateTime
