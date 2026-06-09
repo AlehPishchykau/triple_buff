@@ -10,7 +10,7 @@ async function refreshPlayers() {
 }
 
 async function fetchMatchesData(period = 'yesterday') {
-	const periods = { yesterday: 1, today: 2, week: 7 };
+	const periods = { yesterday: 1, today: 1, week: 7 };
 	const days = periods[period] || 1;
 	const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
 

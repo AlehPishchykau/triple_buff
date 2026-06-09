@@ -15,7 +15,7 @@ const { secondsToTime, convertMiliseconds, isWin } = require('./utils');
 
 const PERIOD_LABELS = {
 	yesterday: 'Вчерашние матчи',
-	today: 'Матчи за последние 2 дня',
+	today: 'Матчи за сутки',
 	week: 'Матчи за неделю',
 };
 
