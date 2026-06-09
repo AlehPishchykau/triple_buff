@@ -531,7 +531,14 @@ async function sendPartyStats(ctx) {
 	const playersMap = await storage.getPlayers();
 	const heroes = await storage.getHeroes();
 	const playerIds = Object.keys(playersMap);
-	const responses = await Promise.all(playerIds.map(id => fetchRecentMatchesDetailed(id)));
+	const responses = [];
+	for (const id of playerIds) {
+		try {
+			responses.push(await fetchRecentMatchesDetailed(id));
+		} catch (_) {
+			responses.push([]);
+		}
+	}
 
 	const matchMap = {};
 	responses.forEach((matches, idx) => {

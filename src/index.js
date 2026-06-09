@@ -28,26 +28,35 @@ function createTelegramSender(telegram, chatId) {
 	};
 }
 
-bot.command('report', async (ctx) => {
-	await deleteMessage(ctx);
+function safeCommand(handler) {
+	return async (ctx) => {
+		await deleteMessage(ctx);
+		try {
+			await handler(ctx);
+		} catch (err) {
+			console.error('Command error:', err.message);
+			try { await ctx.replyWithHTML(`<blockquote>Ошибка: ${err.message}</blockquote>`); } catch (_) {}
+		}
+	};
+}
+
+bot.command('report', safeCommand(async (ctx) => {
 	const arg = ctx.message.text.split(' ')[1];
 	const period = arg === 'week' ? 'week' : 'today';
-	sendReport(ctx, period);
-});
+	await sendReport(ctx, period);
+}));
 
-bot.command('winrate', async (ctx) => {
-	await deleteMessage(ctx);
-	return ctx.reply(
+bot.command('winrate', safeCommand(async (ctx) => {
+	await ctx.reply(
 		'Выбери период:',
 		Markup.inlineKeyboard([
 			[Markup.button.callback('За все время', 'wr_period:allTime'),
 			 Markup.button.callback('За месяц', 'wr_period:oneMonth')]
 		])
 	);
-});
+}));
 
-bot.command('last', async (ctx) => {
-	await deleteMessage(ctx);
+bot.command('last', safeCommand(async (ctx) => {
 	const result = await sendLastMatchesList(ctx);
 	if (!result) return;
 
@@ -59,37 +68,17 @@ bot.command('last', async (ctx) => {
 		return [Markup.button.callback(label, `match:${m.matchId}:${m.playerId}`)];
 	});
 
-	return ctx.reply(
+	await ctx.reply(
 		'Последние матчи:',
 		Markup.inlineKeyboard(buttons)
 	);
-});
+}));
 
-bot.command('time', async (ctx) => {
-	await deleteMessage(ctx);
-
-	sendLastPlayTime(ctx);
-});
-
-bot.command('heroes', async (ctx) => {
-	await deleteMessage(ctx);
-	sendHeroesStats(ctx);
-});
-
-bot.command('streak', async (ctx) => {
-	await deleteMessage(ctx);
-	sendStreaks(ctx);
-});
-
-bot.command('party', async (ctx) => {
-	await deleteMessage(ctx);
-	sendPartyStats(ctx);
-});
-
-bot.command('week', async (ctx) => {
-	await deleteMessage(ctx);
-	sendReport(ctx, 'week');
-});
+bot.command('time', safeCommand((ctx) => sendLastPlayTime(ctx)));
+bot.command('heroes', safeCommand((ctx) => sendHeroesStats(ctx)));
+bot.command('streak', safeCommand((ctx) => sendStreaks(ctx)));
+bot.command('party', safeCommand((ctx) => sendPartyStats(ctx)));
+bot.command('week', safeCommand((ctx) => sendReport(ctx, 'week')));
 
 bot.command('adios', async (ctx) => {
 	await deleteMessage(ctx);
