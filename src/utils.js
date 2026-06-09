@@ -1,5 +1,4 @@
 require('dotenv').config();
-const fs = require('node:fs');
 
 const { STRATZ_GRAPHQL_URL } = require('./constants');
 const { STRATZ_TOKEN } = process.env;
@@ -66,17 +65,8 @@ function convertMiliseconds(miliseconds, format) {
 	}
 };
 
-function writeJSONToFile(data) {
-	fs.writeFile('./output.json', JSON.stringify(data), err => {
-		if (err) {
-		console.error(err);
-		}
-	})
-}
-
 module.exports = {
 	graphqlRequest,
 	secondsToTime,
-	convertMiliseconds,
-	writeJSONToFile
+	convertMiliseconds
 };

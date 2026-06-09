@@ -2,98 +2,66 @@ require('dotenv').config();
 const cron = require('node-cron');
 const { Markup, Telegraf } = require('telegraf');
 
-const { 
+const {
 	sendReport,
 	sendPlayerWinrate,
 	sendPlayersWinrate,
 	sendLastMatchStats,
+	sendLastMatchesList,
+	sendMatchDetails,
+	sendLastPlayTime,
+	sendHeroesStats,
+	sendStreaks,
+	sendPartyStats,
 	deleteMessage,
 	deleteAction,
-	sendLastPlayTime
 } = require('./commands');
 const { storage } = require('./storage');
-const { TELEGRAM_BOT_TOKEN } = process.env;
+const { TELEGRAM_BOT_TOKEN, CHAT_ID } = process.env;
 
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
-let cronTask = null;
 
-bot.command('start', async (ctx) => {
-	await deleteMessage(ctx);
-	cronTask?.stop?.();
-	
-	cronTask = cron.schedule('0 8 * * *', () => {
-		sendReport(ctx);
-	}, {
-		scheduled: true,
-		timezone: "Europe/Vilnius"
-	});
-});
-
-bot.command('stop', async (ctx) => {
-	await deleteMessage(ctx);
-	cronTask?.stop?.();
-	cronTask = null;
-});
-
-bot.command('cron', async (ctx) => {
-	await deleteMessage(ctx);
-	ctx.sendMessage(cronTask ? 'Cron is working' : 'Cron is stopped');
-});
+function createTelegramSender(telegram, chatId) {
+	return {
+		replyWithHTML: (msg) => telegram.sendMessage(chatId, msg, { parse_mode: 'HTML' }),
+		replyWithPhoto: (url) => telegram.sendPhoto(chatId, url),
+	};
+}
 
 bot.command('report', async (ctx) => {
 	await deleteMessage(ctx);
-	sendReport(ctx);
+	const arg = ctx.message.text.split(' ')[1];
+	const period = arg === 'week' ? 'week' : 'today';
+	sendReport(ctx, period);
 });
 
 bot.command('winrate', async (ctx) => {
 	await deleteMessage(ctx);
-
-	const playersData = await storage.getPlayers();
-	const buttons = Object.entries(playersData).map(([id, data]) => {
-		return Markup.button.callback(data.name, `winrate:${id}`);
-	});
-
 	return ctx.reply(
-		'All time winrate',
-		Markup.inlineKeyboard(buttons, { columns: 1 })
+		'Выбери период:',
+		Markup.inlineKeyboard([
+			[Markup.button.callback('За все время', 'wr_period:allTime'),
+			 Markup.button.callback('За месяц', 'wr_period:oneMonth')]
+		])
 	);
-});
-
-bot.command('winrate30', async (ctx) => {
-	await deleteMessage(ctx);
-
-	const playersData = await storage.getPlayers();
-	const buttons = Object.entries(playersData).map(([id, data]) => {
-		return Markup.button.callback(data.name, `winrate30:${id}`);
-	});
-
-	return ctx.reply(
-		'Last month winrate',
-		Markup.inlineKeyboard(buttons, { columns: 1 })
-	);
-});
-
-bot.command('winrate_all', async (ctx) => {
-	await deleteMessage(ctx);
-	await sendPlayersWinrate(ctx);
-});
-
-bot.command('winrate30_all', async (ctx) => {
-	await deleteMessage(ctx);
-	await sendPlayersWinrate(ctx, 'oneMonth');
 });
 
 bot.command('last', async (ctx) => {
 	await deleteMessage(ctx);
+	const result = await sendLastMatchesList(ctx);
+	if (!result) return;
 
-	const playersData = await storage.getPlayers();
-	const buttons = Object.entries(playersData).map(([id, data]) => {
-		return Markup.button.callback(data.name, `last:${id}`);
+	const { convertMiliseconds } = require('./utils');
+	const buttons = result.matches.map(m => {
+		const ago = convertMiliseconds(Date.now() - m.startDateTime * 1000);
+		const emoji = m.isVictory ? '✅' : '❌';
+		const label = `${emoji} ${m.playerName} — ${m.heroName} (${m.kills}/${m.deaths}/${m.assists}) ${ago}`;
+		return [Markup.button.callback(label, `match:${m.matchId}:${m.playerId}`)];
 	});
 
 	return ctx.reply(
-		'Last turbo match stats',
-		Markup.inlineKeyboard(buttons, { columns: 1 })
+		'Последние матчи:',
+		Markup.inlineKeyboard(buttons)
 	);
 });
 
@@ -103,67 +71,87 @@ bot.command('time', async (ctx) => {
 	sendLastPlayTime(ctx);
 });
 
+bot.command('heroes', async (ctx) => {
+	await deleteMessage(ctx);
+	sendHeroesStats(ctx);
+});
+
+bot.command('streak', async (ctx) => {
+	await deleteMessage(ctx);
+	sendStreaks(ctx);
+});
+
+bot.command('party', async (ctx) => {
+	await deleteMessage(ctx);
+	sendPartyStats(ctx);
+});
+
+bot.command('week', async (ctx) => {
+	await deleteMessage(ctx);
+	sendReport(ctx, 'week');
+});
+
 bot.command('adios', async (ctx) => {
 	await deleteMessage(ctx);
 	ctx.replyWithVoice('BQACAgIAAxkBAAIBLWWpm5CuDGxJZe5dkFhVLCK-0k8KAAKyPgACgwVJSVAsluDHpCQlNAQ');
 });
 
-bot.action(/winrate:.+/, async (ctx) => {
-	await deleteAction(ctx);
-
-	const command = ctx.match[0];
-	const playerId = command.split(':')[1];
-
-	sendPlayerWinrate(ctx, playerId);
+bot.action(/wr_period:(.+)/, async (ctx) => {
+	const period = ctx.match[1];
+	const playersData = await storage.getPlayers();
+	const playerButtons = Object.entries(playersData).map(([id, data]) =>
+		[Markup.button.callback(data.name, `wr_player:${period}:${id}`)]
+	);
+	const periodLabel = period === 'allTime' ? 'За все время' : 'За месяц';
+	await ctx.editMessageText(
+		`${periodLabel} — выбери игрока:`,
+		Markup.inlineKeyboard([
+			[Markup.button.callback('Все игроки', `wr_player:${period}:all`)],
+			...playerButtons
+		])
+	);
 });
 
-bot.action(/winrate30:.+/, async (ctx) => {
+bot.action(/wr_player:(.+):(.+)/, async (ctx) => {
 	await deleteAction(ctx);
-
-	const command = ctx.match[0];
-	const playerId = command.split(':')[1];
-
-	sendPlayerWinrate(ctx, playerId, 'oneMonth');
+	const period = ctx.match[1];
+	const playerId = ctx.match[2];
+	if (playerId === 'all') {
+		await sendPlayersWinrate(ctx, period);
+	} else {
+		await sendPlayerWinrate(ctx, playerId, period);
+	}
 });
 
-bot.action(/last:.+/, async (ctx) => {
+bot.action(/match:(\d+):(\d+)/, async (ctx) => {
 	await deleteAction(ctx);
-
-	const command = ctx.match[0];
-	const playerId = command.split(':')[1];
-
-	sendLastMatchStats(ctx, playerId);
+	const matchId = ctx.match[1];
+	const playerId = ctx.match[2];
+	sendMatchDetails(ctx, matchId, playerId);
 });
 
 bot.telegram.setMyCommands([
-	{
-		command: 'last',
-		description: 'Last turbo match stats',
-	},
-	{
-		command: 'time',
-		description: 'Time without Dota 2',
-	},
-	{
-		command: 'winrate',
-		description: 'All time winrate in turbo',
-	},
-	{
-		command: 'winrate30',
-		description: 'Last month winrate in turbo',
-	},
-	{
-		command: 'winrate_all',
-		description: 'All time winrate in turbo for all men',
-	},
-	{
-		command: 'winrate30_all',
-		description: 'Last month winrate in turbo for all men',
-	}
+	{ command: 'report', description: 'Отчёт по матчам (/report или /report week)' },
+	{ command: 'winrate', description: 'Винрейт в турбо' },
+	{ command: 'last', description: 'Последний матч' },
+	{ command: 'heroes', description: 'Топ-3 героев' },
+	{ command: 'streak', description: 'Серии побед/поражений' },
+	{ command: 'party', description: 'Совместные игры' },
+	{ command: 'week', description: 'Недельный отчёт' },
+	{ command: 'time', description: 'Время без Dota 2' },
 ]);
+
+if (CHAT_ID) {
+	cron.schedule('0 8 * * *', () => {
+		const sender = createTelegramSender(bot.telegram, CHAT_ID);
+		sendReport(sender, 'yesterday');
+	}, {
+		scheduled: true,
+		timezone: 'Europe/Vilnius'
+	});
+}
 
 bot.launch();
 
-// Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
