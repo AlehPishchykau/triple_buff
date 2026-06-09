@@ -177,7 +177,7 @@ async function fetchPlayerMatchesStats(playerId) {
 async function fetchPlayerHeroesStats(playerId) {
 	const data = await graphqlRequest(`{
 		player(steamAccountId: ${playerId}) {
-			heroesPerformance(request: { gameModeIds: [${TURBO_ID}] }) {
+			heroesPerformance(request: { gameModeIds: [${TURBO_ID}], take: 5000 }) {
 				heroId
 				matchCount
 				winCount
