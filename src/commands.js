@@ -158,7 +158,7 @@ async function sendLastMatchStats(ctx, playerId) {
 
 	const message = `
 		<blockquote>
-		<b>${players[playerId].name}</b> <a href="https://www.dotabuff.com/matches/${match.match_id}">${won ? 'won' : 'lost'} last match on ${hero?.displayName || '???'}</a>
+		<b>${players[playerId].name}</b> <a href="https://www.opendota.com/matches/${match.match_id}">${won ? 'won' : 'lost'} last match on ${hero?.displayName || '???'}</a>
 		${(new Date(match.start_time * 1000)).toLocaleString('ru-RU', { timeZone: 'UTC' })} (UTC)
 
 		Duration: ${secondsToTime(match.duration)}
@@ -219,7 +219,7 @@ async function sendMatchDetails(ctx, matchId, playerId) {
 
 	const message = `
 		<blockquote>
-		<b>${players[playerId].name}</b> <a href="https://www.dotabuff.com/matches/${match.match_id}">${won ? 'won' : 'lost'} on ${hero?.displayName || '???'}</a>
+		<b>${players[playerId].name}</b> <a href="https://www.opendota.com/matches/${match.match_id}">${won ? 'won' : 'lost'} on ${hero?.displayName || '???'}</a>
 		${(new Date(match.start_time * 1000)).toLocaleString('ru-RU', { timeZone: 'UTC' })} (UTC)
 
 		Duration: ${secondsToTime(match.duration)}
