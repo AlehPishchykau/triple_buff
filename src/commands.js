@@ -36,22 +36,6 @@ async function sendReport(ctx, period = 'yesterday') {
 		await ctx.replyWithHTML(awards);
 	}
 
-	const playedIds = Object.keys(parsedMatchesData.players);
-	if (playedIds.length > 0) {
-		const heroStatsResponses = await Promise.all(
-			playedIds.map(id => fetchPlayerHeroesStats(id))
-		);
-		const lines = heroStatsResponses.map((heroPerf, index) => {
-			const pid = playedIds[index];
-			const name = playersData[pid]?.name || 'Unknown';
-			if (!heroPerf || !heroPerf.length) return `<b>${name}</b>: нет данных`;
-			const top = heroPerf.sort((a, b) => b.matchCount - a.matchCount)[0];
-			const hero = heroes[top.heroId]?.displayName || '???';
-			const wr = ((top.winCount / top.matchCount) * 100).toFixed(1);
-			return `<b>${name}</b>: ${hero} (${top.matchCount} игр, ${wr}%)`;
-		});
-		await ctx.replyWithHTML(`<blockquote><b>Любимые герои (за все время)</b>\n${lines.join('\n')}</blockquote>`);
-	}
 }
 
 async function sendMatchesSummary(ctx, message) {
