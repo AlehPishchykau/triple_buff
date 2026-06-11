@@ -226,6 +226,11 @@ async function sendMatchDetails(ctx, matchId, playerId) {
 	`;
 
 	await ctx.replyWithHTML(message);
+
+	const analysis = await generateMatchAnalysis(match, playerId, players, heroes);
+	if (analysis) {
+		await ctx.replyWithHTML(`<blockquote>${escapeHTML(analysis)}</blockquote>`);
+	}
 }
 
 async function sendLastPlayTime(ctx) {
@@ -923,6 +928,55 @@ ${playerList}
 
 	const answer = step2.choices[0].message.content;
 	await reply(answer);
+}
+
+async function generateMatchAnalysis(match, playerId, playersMap, heroes) {
+	const trackedIds = new Set(Object.keys(playersMap).map(Number));
+
+	const formatPlayer = (p) => {
+		const hero = heroes[p.hero_id]?.displayName || '???';
+		const team = p.player_slot < 128 ? 'Radiant' : 'Dire';
+		const won = p.radiant_win === (p.player_slot < 128);
+		const name = playersMap[String(p.account_id)]?.name || p.personaname || '???';
+		const isTracked = trackedIds.has(p.account_id);
+		return `${isTracked ? '[НАШ] ' : ''}${name} — ${hero} (${team}, ${won ? 'WIN' : 'LOSS'}): KDA ${p.kills}/${p.deaths}/${p.assists}, NW ${p.net_worth || p.total_gold || 0}, GPM ${p.gold_per_min}, Hero DMG ${p.hero_damage}, Tower DMG ${p.tower_damage}`;
+	};
+
+	const allPlayers = match.players.map(formatPlayer).join('\n');
+	const selectedName = playersMap[playerId]?.name || playerId;
+
+	const context = [
+		`Матч: ${match.match_id}, длительность ${Math.round(match.duration / 60)} мин, ${match.radiant_win ? 'Radiant' : 'Dire'} победили`,
+		'',
+		'Все игроки:',
+		allPlayers,
+		'',
+		`Анализируемый игрок: ${selectedName} (отмечен [НАШ])`,
+	].join('\n');
+
+	try {
+		const OpenAI = require('openai');
+		const client = new OpenAI();
+		const response = await client.chat.completions.create({
+			model: 'gpt-4.1-mini',
+			max_tokens: 600,
+			messages: [
+				{ role: 'system', content: `Ты — аналитик Dota 2. Напиши краткий разбор матча на русском с матами и сленгом.
+
+Структура:
+1. Общий обзор матча (1-2 предложения): кто победил, как прошла игра
+2. Наши игроки (отмечены [НАШ]): кратко по каждому — что сделал хорошо/плохо
+3. Детальный разбор выбранного игрока (3-4 предложения): стиль игры, вклад, косяки
+
+Пиши plain text без форматирования. Никакого markdown, HTML.` },
+				{ role: 'user', content: context }
+			]
+		});
+		return response.choices[0].message.content;
+	} catch (err) {
+		console.error('Match analysis error:', err.message);
+		return null;
+	}
 }
 
 module.exports = {
