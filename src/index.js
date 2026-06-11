@@ -102,7 +102,14 @@ bot.command('call', safeCommand(async (ctx) => {
 	await ctx.reply(`Какая готовность?\n\n${TELEGRAM_USERNAMES.join(' ')}`);
 }));
 
-bot.command('ask', safeCommand((ctx) => handleAsk(ctx)));
+bot.command('ask', async (ctx) => {
+	try {
+		await handleAsk(ctx);
+	} catch (err) {
+		console.error('Ask error:', err.message);
+		try { await ctx.replyWithHTML(`<blockquote>Ошибка: ${err.message}</blockquote>`); } catch (_) {}
+	}
+});
 
 bot.command('adios', async (ctx) => {
 	await deleteMessage(ctx);

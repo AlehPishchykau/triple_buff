@@ -814,9 +814,11 @@ const ASK_TOOL_HANDLERS = {
 };
 
 async function handleAsk(ctx) {
+	const messageId = ctx.message.message_id;
+	const reply = (text) => ctx.reply(text, { reply_parameters: { message_id: messageId } });
 	const question = ctx.message.text.replace(/^\/ask\s*/, '').trim();
 	if (!question) {
-		await ctx.replyWithHTML('<blockquote>Напиши вопрос после /ask, например:\n/ask кто больше всех фидит на pudge?</blockquote>');
+		await reply('Напиши вопрос после /ask, например:\n/ask кто больше всех фидит на pudge?');
 		return;
 	}
 
@@ -849,7 +851,7 @@ ${playerList}
 	const choice = step1.choices[0];
 
 	if (!choice.message.tool_calls || !choice.message.tool_calls.length) {
-		await sendSafeHTML(ctx, choice.message.content || 'Не понял вопрос. Попробуй переформулировать.');
+		await reply(choice.message.content || 'Не понял вопрос. Попробуй переформулировать.');
 		return;
 	}
 
@@ -883,7 +885,7 @@ ${playerList}
 	});
 
 	const answer = step2.choices[0].message.content;
-	await sendSafeHTML(ctx, `<b>❓ ${escapeHTML(question)}</b>\n\n${escapeHTML(answer)}`);
+	await reply(answer);
 }
 
 module.exports = {
