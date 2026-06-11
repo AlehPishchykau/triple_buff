@@ -737,40 +737,54 @@ const ASK_TOOLS = [
 ];
 
 const ASK_TOOL_HANDLERS = {
-	get_player_winrate: async (args) => {
-		return await fetchPlayerMatchesStats(args.player_id);
+	get_player_winrate: async (args, _heroes, playersMap) => {
+		const name = playersMap[args.player_id]?.name || args.player_id;
+		const stats = await fetchPlayerMatchesStats(args.player_id);
+		return { player: name, ...stats };
 	},
-	get_player_heroes: async (args, heroes) => {
+	get_player_heroes: async (args, heroes, playersMap) => {
+		const name = playersMap[args.player_id]?.name || args.player_id;
 		const stats = await fetchPlayerHeroesStats(args.player_id);
-		return stats.slice(0, 20).map(h => ({
-			hero: heroes[h.heroId]?.displayName || h.heroId,
-			games: h.matchCount,
-			wins: h.winCount,
-			winrate: ((h.winCount / h.matchCount) * 100).toFixed(1) + '%'
-		}));
+		return {
+			player: name,
+			heroes: stats.slice(0, 20).map(h => ({
+				hero: heroes[h.heroId]?.displayName || h.heroId,
+				games: h.matchCount,
+				wins: h.winCount,
+				winrate: ((h.winCount / h.matchCount) * 100).toFixed(1) + '%'
+			}))
+		};
 	},
-	get_recent_matches: async (args, heroes) => {
+	get_recent_matches: async (args, heroes, playersMap) => {
+		const name = playersMap[args.player_id]?.name || args.player_id;
 		const count = Math.min(args.count || 10, 20);
 		const matches = await fetchRecentMatches(args.player_id, count);
-		return matches.map(m => ({
-			match_id: m.match_id,
-			hero: heroes[m.hero_id]?.displayName || m.hero_id,
-			win: isWin(m),
-			kills: m.kills, deaths: m.deaths, assists: m.assists,
-			gpm: m.gold_per_min, xpm: m.xp_per_min,
-			duration_min: Math.round(m.duration / 60),
-		}));
+		return {
+			player: name,
+			matches: matches.map(m => ({
+				match_id: m.match_id,
+				hero: heroes[m.hero_id]?.displayName || m.hero_id,
+				win: isWin(m),
+				kills: m.kills, deaths: m.deaths, assists: m.assists,
+				gpm: m.gold_per_min, xpm: m.xp_per_min,
+				duration_min: Math.round(m.duration / 60),
+			}))
+		};
 	},
 	get_player_peers: async (args, _heroes, playersMap) => {
+		const name = playersMap[args.player_id]?.name || args.player_id;
 		const peers = await fetchPeers(args.player_id, 30);
 		const trackedIds = new Set(Object.keys(playersMap).map(Number));
-		return peers
-			.filter(p => trackedIds.has(p.account_id))
-			.map(p => ({
-				name: playersMap[String(p.account_id)]?.name || p.account_id,
-				games: p.games, wins: p.win,
-				winrate: ((p.win / p.games) * 100).toFixed(1) + '%'
-			}));
+		return {
+			player: name,
+			peers: peers
+				.filter(p => trackedIds.has(p.account_id))
+				.map(p => ({
+					name: playersMap[String(p.account_id)]?.name || p.account_id,
+					games: p.games, wins: p.win,
+					winrate: ((p.win / p.games) * 100).toFixed(1) + '%'
+				}))
+		};
 	},
 	get_match_details: async (args, heroes) => {
 		const match = await fetchMatchDetail(args.match_id);
