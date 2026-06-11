@@ -607,9 +607,13 @@ async function generateAIReport(data, playersMap, heroes, period) {
 	const mvp = getMVP(data, playersMap);
 	const periodLabel = PERIOD_LABELS[period] || PERIOD_LABELS.yesterday;
 
+	const playerCount = Object.keys(data.players).length;
+	const matchCount = wins + loses;
+
 	const context = [
 		`Период: ${periodLabel}`,
-		`Общий счёт: ${wins}W-${loses}L`,
+		`Всего матчей: ${matchCount}, общий счёт: ${wins}W-${loses}L`,
+		`Играло: ${playerCount} чел.`,
 		`Самый длинный матч: ${secondsToTime(data.summary.longestMatchDuration)}`,
 		`Самый короткий матч: ${secondsToTime(data.summary.shortestMatchDuration)}`,
 		'',
@@ -622,24 +626,32 @@ async function generateAIReport(data, playersMap, heroes, period) {
 		`MVP: ${mvp.name} (${mvp.wins}W-${mvp.loses}L, KDA ${mvp.kdaAvg.toFixed(1)}, NW ${mvp.nwAvg.toFixed(0)})`,
 	].join('\n');
 
+	const lengthGuide = matchCount <= 3 ? '50-80 слов' : matchCount <= 8 ? '80-150 слов' : '150-200 слов';
+
 	try {
 		const OpenAI = require('openai');
 		const client = new OpenAI();
 		const response = await client.chat.completions.create({
 			model: 'gpt-4o-mini',
-			max_tokens: 800,
+			max_tokens: 600,
 			messages: [
-				{ role: 'system', content: `Ты — дерзкий комментатор матчей Dota 2 для группы друзей в Telegram. Пиши отчёт по вчерашним играм на русском.
+				{ role: 'system', content: `Ты — дерзкий комментатор Dota 2 для чата друзей. Пиши на русском.
 
-Правила:
-- Используй мат и сленг, будь дерзким и смешным
-- Сам реши, что подсветить: кто затащил, кто профидил, необычные цифры, интересные контрасты
-- Обязательно упомяни MVP и самого жёсткого фидера
-- Не перечисляй сухую статистику — интерпретируй её, издевайся, хвали
-- Заверши коротким стихом/частушкой (4-6 строк)
-- Формат: сплошной текст, без заголовков, без списков, без markdown
-- Длина: 150-250 слов
-- Не используй HTML-теги` },
+ЖЁСТКИЕ ПРАВИЛА:
+- Пиши ТОЛЬКО по данным ниже. Не придумывай имена, события, цифры, которых нет в данных.
+- Каждое имя в тексте должно быть из списка игроков. Никаких выдуманных прозвищ.
+- Если факт не следует из данных — не пиши его.
+
+СТИЛЬ:
+- Мат и дота-сленг приветствуются
+- Будь дерзким: издевайся над фидерами, хвали тащеров
+- Подмечай контрасты: если у кого-то 100% WR а у другого 0% — это смешно. Если KDA 1.0 — это жёстко.
+- MVP и главный фидер — обязательные персонажи
+
+ФОРМАТ:
+- Сплошной текст, без заголовков, без списков, без markdown, без HTML-тегов
+- Длина: ${lengthGuide}. Мало матчей = короткий текст. Не лей воду.
+- Заверши частушкой (4 строки с рифмой) если матчей больше 3. Если матчей мало — без частушки.` },
 				{ role: 'user', content: context }
 			]
 		});
