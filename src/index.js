@@ -99,7 +99,7 @@ bot.command('challenge', safeCommand(async (ctx) => {
 
 bot.command('call', safeCommand(async (ctx) => {
 	const { TELEGRAM_USERNAMES } = require('./constants');
-	await ctx.reply(TELEGRAM_USERNAMES.join(' '));
+	await ctx.reply(`Какая готовность?\n\n${TELEGRAM_USERNAMES.join(' ')}`);
 }));
 
 bot.command('ask', safeCommand((ctx) => handleAsk(ctx)));
