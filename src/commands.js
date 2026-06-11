@@ -252,6 +252,15 @@ async function sendLastPlayTime(ctx) {
 	await ctx.replyWithHTML(message);
 }
 
+async function sendSafeHTML(ctx, html) {
+	try {
+		await ctx.replyWithHTML(html);
+	} catch (_) {
+		const plain = html.replace(/<[^>]+>/g, '');
+		await ctx.reply(plain);
+	}
+}
+
 async function deleteMessage(ctx) {
 	try {
 		await ctx.deleteMessage(ctx.update.message.messageId);
@@ -574,7 +583,7 @@ async function generateChallenge(ctx, playerId) {
 		: `Статистика игрока (топ герои в турбо):\n${playerContext}\n\nОдин челлендж для ${targetName}.`;
 
 	const response = await client.chat.completions.create({
-		model: 'gpt-4o-mini',
+		model: 'gpt-4.1-mini',
 		max_tokens: 200,
 		messages: [
 			{ role: 'system', content: systemPrompt },
@@ -639,7 +648,7 @@ async function generateAIReport(data, playersMap, heroes, period) {
 		const OpenAI = require('openai');
 		const client = new OpenAI();
 		const response = await client.chat.completions.create({
-			model: 'gpt-4o-mini',
+			model: 'gpt-4.1-mini',
 			max_tokens: 600,
 			messages: [
 				{ role: 'system', content: `Ты — дерзкий комментатор Dota 2 для чата друзей. Пиши на русском.
@@ -831,8 +840,8 @@ ${playerList}
 	];
 
 	const step1 = await client.chat.completions.create({
-		model: 'gpt-4o-mini',
-		max_tokens: 200,
+		model: 'gpt-4.1-mini',
+		max_tokens: 300,
 		messages,
 		tools: ASK_TOOLS,
 	});
@@ -840,7 +849,7 @@ ${playerList}
 	const choice = step1.choices[0];
 
 	if (!choice.message.tool_calls || !choice.message.tool_calls.length) {
-		await ctx.replyWithHTML(`<blockquote>${choice.message.content || 'Не понял вопрос. Попробуй переформулировать.'}</blockquote>`);
+		await sendSafeHTML(ctx, choice.message.content || 'Не понял вопрос. Попробуй переформулировать.');
 		return;
 	}
 
@@ -865,16 +874,16 @@ ${playerList}
 	});
 
 	const step2 = await client.chat.completions.create({
-		model: 'gpt-4o-mini',
-		max_tokens: 500,
+		model: 'gpt-4.1-mini',
+		max_tokens: 800,
 		messages: [
 			...messages,
-			{ role: 'system', content: 'Ответь на вопрос пользователя по полученным данным. Кратко, по делу, с юмором. Форматирование: Telegram HTML (<b>, <i>, <code>). Не используй markdown (никаких звёздочек и обратных кавычек).' }
+			{ role: 'system', content: 'Ответь на вопрос пользователя по полученным данным. Кратко, по делу, с юмором. Пиши plain text без какого-либо форматирования. Никакого markdown, HTML, звёздочек, кавычек.' }
 		],
 	});
 
 	const answer = step2.choices[0].message.content;
-	await ctx.replyWithHTML(`<blockquote><b>❓ ${escapeHTML(question)}</b>\n\n${answer}</blockquote>`);
+	await sendSafeHTML(ctx, `<b>❓ ${escapeHTML(question)}</b>\n\n${escapeHTML(answer)}`);
 }
 
 module.exports = {
