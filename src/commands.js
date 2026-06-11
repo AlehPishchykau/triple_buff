@@ -1,4 +1,4 @@
-const { PLAYERS_IDS } = require('./constants');
+const { PLAYERS_IDS, PLAYER_TELEGRAM_MAP } = require('./constants');
 const {
 	fetchMatchesData,
 	fetchPlayersData,
@@ -828,16 +828,25 @@ async function handleAsk(ctx) {
 	const heroes = await storage.getHeroes();
 
 	const playerList = Object.entries(playersMap)
-		.map(([id, data]) => `${data.name} (id: ${id})`)
+		.map(([id, data]) => {
+			const tg = PLAYER_TELEGRAM_MAP[Number(id)] || '';
+			return `${data.name} (id: ${id}, telegram: ${tg})`;
+		})
 		.join('\n');
+
+	const fromUser = ctx.message.from;
+	const authorTag = fromUser.username ? `@${fromUser.username}` : fromUser.first_name;
 
 	const messages = [
 		{ role: 'system', content: `Ты — помощник для группы друзей, играющих в Dota 2 Turbo. Отвечай на русском. Используй мат и сленг, будь дерзким.
 
-Доступные игроки:
+Игроки (Steam-ник, id, telegram):
 ${playerList}
 
+Вопрос задаёт: ${authorTag}
+
 Можешь отвечать на любые вопросы. Если вопрос про статистику игроков — вызови нужные функции. Если вопрос общий (про Dota 2, героев, мету, что угодно) — отвечай из своих знаний.
+Если автор пишет "мой", "у меня" — определи его по telegram-нику из списка выше.
 Никогда не задавай уточняющих вопросов. Всегда давай конкретный ответ.
 Если вопрос про всех игроков — вызови функцию для каждого.` },
 		{ role: 'user', content: question }

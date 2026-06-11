@@ -18,10 +18,21 @@ const TELEGRAM_USERNAMES = [
 	'@a_volynets',    // Blink
 ];
 
+const PLAYER_TELEGRAM_MAP = {
+	157339325: '@midsummer314',  // Tango
+	128559468: '@Myosis',        // Midas
+	162211548: '@waldemarks',    // Vodorod
+	56193772:  '@sashashukala',  // Mechasm
+	128920198: '@privet_aga',    // Desolator
+	306666325: '@conden5at',     // Mango
+	129638532: '@a_volynets',    // Blink
+};
+
 const OPENDOTA_API_URL = 'https://api.opendota.com/api';
 
 module.exports = {
 	PLAYERS_IDS,
 	TELEGRAM_USERNAMES,
+	PLAYER_TELEGRAM_MAP,
 	OPENDOTA_API_URL
 };
