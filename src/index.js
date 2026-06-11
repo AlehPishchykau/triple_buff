@@ -14,6 +14,7 @@ const {
 	sendStreaks,
 	sendPartyStats,
 	generateChallenge,
+	handleAsk,
 	deleteMessage,
 	deleteAction,
 } = require('./commands');
@@ -101,6 +102,8 @@ bot.command('all', safeCommand(async (ctx) => {
 	await ctx.reply(TELEGRAM_USERNAMES.join(' '));
 }));
 
+bot.command('ask', safeCommand((ctx) => handleAsk(ctx)));
+
 bot.command('adios', async (ctx) => {
 	await deleteMessage(ctx);
 	ctx.replyWithVoice('BQACAgIAAxkBAAIBLWWpm5CuDGxJZe5dkFhVLCK-0k8KAAKyPgACgwVJSVAsluDHpCQlNAQ');
@@ -179,6 +182,7 @@ bot.telegram.setMyCommands([
 	{ command: 'week', description: 'Недельный отчёт' },
 	{ command: 'time', description: 'Время без Dota 2' },
 	{ command: 'challenge', description: 'Рандомный челлендж' },
+	{ command: 'ask', description: 'Задать вопрос ИИ (/ask вопрос)' },
 	{ command: 'all', description: 'Позвать всех' },
 ]);
 

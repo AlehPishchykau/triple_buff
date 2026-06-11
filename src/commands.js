@@ -670,6 +670,199 @@ async function generateAIReport(data, playersMap, heroes, period) {
 	}
 }
 
+const ASK_TOOLS = [
+	{
+		type: 'function',
+		function: {
+			name: 'get_player_winrate',
+			description: 'Win/loss stats for a player in turbo. Returns allTime and oneMonth.',
+			parameters: {
+				type: 'object',
+				properties: { player_id: { type: 'string' } },
+				required: ['player_id']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'get_player_heroes',
+			description: 'Top heroes for a player in turbo (sorted by games played). Returns heroId, matchCount, winCount.',
+			parameters: {
+				type: 'object',
+				properties: { player_id: { type: 'string' } },
+				required: ['player_id']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'get_recent_matches',
+			description: 'Last N turbo matches for a player. Returns hero, kills, deaths, assists, gpm, xpm, duration, win/loss.',
+			parameters: {
+				type: 'object',
+				properties: {
+					player_id: { type: 'string' },
+					count: { type: 'number', description: 'How many matches (max 20)' }
+				},
+				required: ['player_id']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'get_player_peers',
+			description: 'Who this player plays with most in turbo (last 30 days). Returns peer account_id, games, wins.',
+			parameters: {
+				type: 'object',
+				properties: { player_id: { type: 'string' } },
+				required: ['player_id']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'get_match_details',
+			description: 'Full details of a specific match. Returns all players with hero, kills, deaths, assists, networth, damage, etc.',
+			parameters: {
+				type: 'object',
+				properties: { match_id: { type: 'string' } },
+				required: ['match_id']
+			}
+		}
+	},
+];
+
+const ASK_TOOL_HANDLERS = {
+	get_player_winrate: async (args) => {
+		return await fetchPlayerMatchesStats(args.player_id);
+	},
+	get_player_heroes: async (args, heroes) => {
+		const stats = await fetchPlayerHeroesStats(args.player_id);
+		return stats.slice(0, 20).map(h => ({
+			hero: heroes[h.heroId]?.displayName || h.heroId,
+			games: h.matchCount,
+			wins: h.winCount,
+			winrate: ((h.winCount / h.matchCount) * 100).toFixed(1) + '%'
+		}));
+	},
+	get_recent_matches: async (args, heroes) => {
+		const count = Math.min(args.count || 10, 20);
+		const matches = await fetchRecentMatches(args.player_id, count);
+		return matches.map(m => ({
+			match_id: m.match_id,
+			hero: heroes[m.hero_id]?.displayName || m.hero_id,
+			win: isWin(m),
+			kills: m.kills, deaths: m.deaths, assists: m.assists,
+			gpm: m.gold_per_min, xpm: m.xp_per_min,
+			duration_min: Math.round(m.duration / 60),
+		}));
+	},
+	get_player_peers: async (args, _heroes, playersMap) => {
+		const peers = await fetchPeers(args.player_id, 30);
+		const trackedIds = new Set(Object.keys(playersMap).map(Number));
+		return peers
+			.filter(p => trackedIds.has(p.account_id))
+			.map(p => ({
+				name: playersMap[String(p.account_id)]?.name || p.account_id,
+				games: p.games, wins: p.win,
+				winrate: ((p.win / p.games) * 100).toFixed(1) + '%'
+			}));
+	},
+	get_match_details: async (args, heroes) => {
+		const match = await fetchMatchDetail(args.match_id);
+		if (!match) return { error: 'Match not found' };
+		return {
+			match_id: match.match_id,
+			duration_min: Math.round(match.duration / 60),
+			radiant_win: match.radiant_win,
+			players: match.players.map(p => ({
+				name: p.personaname, hero: heroes[p.hero_id]?.displayName || p.hero_id,
+				kills: p.kills, deaths: p.deaths, assists: p.assists,
+				networth: p.net_worth || p.total_gold,
+				hero_damage: p.hero_damage, tower_damage: p.tower_damage,
+				gpm: p.gold_per_min, team: p.player_slot < 128 ? 'radiant' : 'dire',
+			}))
+		};
+	},
+};
+
+async function handleAsk(ctx) {
+	const question = ctx.message.text.replace(/^\/ask\s*/, '').trim();
+	if (!question) {
+		await ctx.replyWithHTML('<blockquote>Напиши вопрос после /ask, например:\n/ask кто больше всех фидит на pudge?</blockquote>');
+		return;
+	}
+
+	const OpenAI = require('openai');
+	const client = new OpenAI();
+	const playersMap = await storage.getPlayers();
+	const heroes = await storage.getHeroes();
+
+	const playerList = Object.entries(playersMap)
+		.map(([id, data]) => `${data.name} (id: ${id})`)
+		.join('\n');
+
+	const messages = [
+		{ role: 'system', content: `Ты — аналитик Dota 2 для группы друзей, играющих в турбо. Отвечай на русском. Используй мат и сленг, будь дерзким.
+
+Доступные игроки:
+${playerList}
+
+Чтобы ответить на вопрос, вызови нужные функции для получения данных. Вызывай только то, что нужно для ответа. Если вопрос про всех игроков — вызови функцию для каждого.` },
+		{ role: 'user', content: question }
+	];
+
+	const step1 = await client.chat.completions.create({
+		model: 'gpt-4o-mini',
+		max_tokens: 200,
+		messages,
+		tools: ASK_TOOLS,
+	});
+
+	const choice = step1.choices[0];
+
+	if (!choice.message.tool_calls || !choice.message.tool_calls.length) {
+		await ctx.replyWithHTML(`<blockquote>${choice.message.content || 'Не понял вопрос. Попробуй переформулировать.'}</blockquote>`);
+		return;
+	}
+
+	messages.push(choice.message);
+
+	const toolResults = await Promise.all(
+		choice.message.tool_calls.map(async (tc) => {
+			const handler = ASK_TOOL_HANDLERS[tc.function.name];
+			if (!handler) return { tool_call_id: tc.id, content: '{"error":"unknown function"}' };
+			try {
+				const args = JSON.parse(tc.function.arguments);
+				const result = await handler(args, heroes, playersMap);
+				return { tool_call_id: tc.id, content: JSON.stringify(result) };
+			} catch (err) {
+				return { tool_call_id: tc.id, content: JSON.stringify({ error: err.message }) };
+			}
+		})
+	);
+
+	toolResults.forEach(tr => {
+		messages.push({ role: 'tool', tool_call_id: tr.tool_call_id, content: tr.content });
+	});
+
+	const step2 = await client.chat.completions.create({
+		model: 'gpt-4o-mini',
+		max_tokens: 500,
+		messages: [
+			...messages,
+			{ role: 'system', content: 'Ответь на вопрос пользователя по полученным данным. Кратко, по делу, с юмором. Не используй markdown и HTML-теги.' }
+		],
+	});
+
+	const answer = step2.choices[0].message.content;
+	await ctx.replyWithHTML(`<blockquote>${answer}</blockquote>`);
+}
+
 module.exports = {
 	sendReport,
 	sendPlayerWinrate,
@@ -682,6 +875,7 @@ module.exports = {
 	sendStreaks,
 	sendPartyStats,
 	generateChallenge,
+	handleAsk,
 	deleteMessage,
 	deleteAction
 };
