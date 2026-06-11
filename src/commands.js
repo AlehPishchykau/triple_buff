@@ -656,7 +656,7 @@ async function generateAIReport(data, playersMap, heroes, period) {
 - MVP и главный фидер — обязательные персонажи
 
 ФОРМАТ:
-- Сплошной текст, без заголовков, без списков, без markdown, без HTML-тегов
+- Сплошной текст, без заголовков, без списков. Форматирование: Telegram HTML (<b>, <i>). Не используй markdown (никаких звёздочек и обратных кавычек)
 - Длина: ${lengthGuide}. Мало матчей = короткий текст. Не лей воду.
 - Заверши частушкой (4 строки с рифмой) если матчей больше 3. Если матчей мало — без частушки.` },
 				{ role: 'user', content: context }
@@ -869,12 +869,12 @@ ${playerList}
 		max_tokens: 500,
 		messages: [
 			...messages,
-			{ role: 'system', content: 'Ответь на вопрос пользователя по полученным данным. Кратко, по делу, с юмором. Не используй markdown и HTML-теги.' }
+			{ role: 'system', content: 'Ответь на вопрос пользователя по полученным данным. Кратко, по делу, с юмором. Форматирование: Telegram HTML (<b>, <i>, <code>). Не используй markdown (никаких звёздочек и обратных кавычек).' }
 		],
 	});
 
 	const answer = step2.choices[0].message.content;
-	await ctx.replyWithHTML(`<blockquote><b>❓ ${escapeHTML(question)}</b>\n\n${escapeHTML(answer)}</blockquote>`);
+	await ctx.replyWithHTML(`<blockquote><b>❓ ${escapeHTML(question)}</b>\n\n${answer}</blockquote>`);
 }
 
 module.exports = {
