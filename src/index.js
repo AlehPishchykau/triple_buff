@@ -13,6 +13,7 @@ const {
 	sendHeroesStats,
 	sendStreaks,
 	sendPartyStats,
+	sendChallenge,
 	deleteMessage,
 	deleteAction,
 } = require('./commands');
@@ -80,6 +81,8 @@ bot.command('heroes', safeCommand((ctx) => sendHeroesStats(ctx)));
 bot.command('streak', safeCommand((ctx) => sendStreaks(ctx)));
 bot.command('party', safeCommand((ctx) => sendPartyStats(ctx)));
 bot.command('week', safeCommand((ctx) => sendReport(ctx, 'week')));
+
+bot.command('challenge', safeCommand((ctx) => sendChallenge(ctx)));
 
 bot.command('all', safeCommand(async (ctx) => {
 	const { TELEGRAM_USERNAMES } = require('./constants');
@@ -152,6 +155,7 @@ bot.telegram.setMyCommands([
 	{ command: 'party', description: 'Совместные игры' },
 	{ command: 'week', description: 'Недельный отчёт' },
 	{ command: 'time', description: 'Время без Dota 2' },
+	{ command: 'challenge', description: 'Рандомный челлендж' },
 	{ command: 'all', description: 'Позвать всех' },
 ]);
 
