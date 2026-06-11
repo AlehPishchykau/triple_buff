@@ -838,7 +838,7 @@ async function handleAsk(ctx) {
 	const authorTag = fromUser.username ? `@${fromUser.username}` : fromUser.first_name;
 
 	const messages = [
-		{ role: 'system', content: `Ты — помощник для группы друзей, играющих в Dota 2 Turbo. Отвечай на русском. Используй мат и сленг, будь дерзким.
+		{ role: 'system', content: `Ты — помощник для группы друзей, играющих в Dota 2 Turbo. По умолчанию отвечай на русском с матами и сленгом. Если пользователь просит ответить на другом языке — отвечай на том языке.
 
 Игроки (Steam-ник, id, telegram):
 ${playerList}
