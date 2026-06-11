@@ -97,7 +97,7 @@ bot.command('challenge', safeCommand(async (ctx) => {
 	);
 }));
 
-bot.command('all', safeCommand(async (ctx) => {
+bot.command('call', safeCommand(async (ctx) => {
 	const { TELEGRAM_USERNAMES } = require('./constants');
 	await ctx.reply(TELEGRAM_USERNAMES.join(' '));
 }));
@@ -183,7 +183,7 @@ bot.telegram.setMyCommands([
 	{ command: 'time', description: 'Время без Dota 2' },
 	{ command: 'challenge', description: 'Рандомный челлендж' },
 	{ command: 'ask', description: 'Задать вопрос ИИ (/ask вопрос)' },
-	{ command: 'all', description: 'Позвать всех' },
+	{ command: 'call', description: 'Позвать всех' },
 ]);
 
 if (CHAT_ID) {
