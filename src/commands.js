@@ -26,16 +26,24 @@ async function sendReport(ctx, period = 'yesterday') {
 
 	const parsedMatchesData = parseMatchesData(matchesData);
 
+	const aiReport = await generateAIReport(parsedMatchesData, playersData, heroes, period);
+	if (aiReport) {
+		await ctx.replyWithHTML(aiReport);
+		const mvp = getMVP(parsedMatchesData, playersData);
+		if (mvp.avatar) {
+			await ctx.replyWithPhoto(mvp.avatar);
+		}
+		return;
+	}
+
 	const summary = getSummary(parsedMatchesData, playersData, period);
 	const mvp = getMVP(parsedMatchesData, playersData);
 	const awards = getAwards(parsedMatchesData, playersData, heroes);
-
 	await sendMatchesSummary(ctx, summary);
 	await sendMVP(ctx, mvp);
 	if (awards) {
 		await ctx.replyWithHTML(awards);
 	}
-
 }
 
 async function sendMatchesSummary(ctx, message) {
@@ -570,6 +578,77 @@ async function generateChallenge(ctx, playerId) {
 	const challenge = response.choices[0].message.content;
 	const title = isRandom ? '🎲 Челлендж' : `🎲 Челлендж для ${targetName}`;
 	await ctx.replyWithHTML(`<blockquote><b>${title}</b>\n\n${challenge}</blockquote>`);
+}
+
+async function generateAIReport(data, playersMap, heroes, period) {
+	const playerLines = Object.entries(data.players).map(([id, stats]) => {
+		const name = playersMap[id]?.name || 'Unknown';
+		const total = stats.wins + stats.loses;
+		const wr = ((stats.wins / total) * 100).toFixed(0);
+		const kdaAvg = (stats.kdas.reduce((a, b) => a + b, 0) / stats.kdas.length).toFixed(1);
+		const nwAvg = Math.round(stats.nws.reduce((a, b) => a + b, 0) / stats.nws.length);
+		const gpmAvg = Math.round(stats.gpms.reduce((a, b) => a + b, 0) / stats.gpms.length);
+		return `${name}: ${stats.wins}W-${stats.loses}L (${wr}%), KDA ${kdaAvg}, GPM ${gpmAvg}, NW ${nwAvg}`;
+	});
+
+	if (!playerLines.length) return null;
+
+	const wins = Object.keys(data.summary.wins).length;
+	const loses = Object.keys(data.summary.loses).length;
+
+	const { awards } = data;
+	const awardLines = [
+		`Фидер: ${playersMap[awards.feeder.steamAccountId]?.name} на ${heroes[awards.feeder.heroId]?.displayName} (${awards.feeder.value} смертей)`,
+		`Фармер: ${playersMap[awards.farmer.steamAccountId]?.name} на ${heroes[awards.farmer.heroId]?.displayName} (${awards.farmer.value} GPM)`,
+		`Разрушитель: ${playersMap[awards.destroyer.steamAccountId]?.name} на ${heroes[awards.destroyer.heroId]?.displayName} (${awards.destroyer.value} tower dmg)`,
+		`Керри: ${playersMap[awards.carry.steamAccountId]?.name} на ${heroes[awards.carry.heroId]?.displayName} (${awards.carry.value} networth)`,
+	];
+
+	const mvp = getMVP(data, playersMap);
+	const periodLabel = PERIOD_LABELS[period] || PERIOD_LABELS.yesterday;
+
+	const context = [
+		`Период: ${periodLabel}`,
+		`Общий счёт: ${wins}W-${loses}L`,
+		`Самый длинный матч: ${secondsToTime(data.summary.longestMatchDuration)}`,
+		`Самый короткий матч: ${secondsToTime(data.summary.shortestMatchDuration)}`,
+		'',
+		'Игроки:',
+		...playerLines,
+		'',
+		'Награды:',
+		...awardLines,
+		'',
+		`MVP: ${mvp.name} (${mvp.wins}W-${mvp.loses}L, KDA ${mvp.kdaAvg.toFixed(1)}, NW ${mvp.nwAvg.toFixed(0)})`,
+	].join('\n');
+
+	try {
+		const OpenAI = require('openai');
+		const client = new OpenAI();
+		const response = await client.chat.completions.create({
+			model: 'gpt-4o-mini',
+			max_tokens: 800,
+			messages: [
+				{ role: 'system', content: `Ты — дерзкий комментатор матчей Dota 2 для группы друзей в Telegram. Пиши отчёт по вчерашним играм на русском.
+
+Правила:
+- Используй мат и сленг, будь дерзким и смешным
+- Сам реши, что подсветить: кто затащил, кто профидил, необычные цифры, интересные контрасты
+- Обязательно упомяни MVP и самого жёсткого фидера
+- Не перечисляй сухую статистику — интерпретируй её, издевайся, хвали
+- Заверши коротким стихом/частушкой (4-6 строк)
+- Формат: сплошной текст, без заголовков, без списков, без markdown
+- Длина: 150-250 слов
+- Не используй HTML-теги` },
+				{ role: 'user', content: context }
+			]
+		});
+		const text = response.choices[0].message.content;
+		return `<blockquote><b>${periodLabel}</b>\n\n${text}</blockquote>`;
+	} catch (err) {
+		console.error('AI report generation error:', err.message);
+		return null;
+	}
 }
 
 module.exports = {
