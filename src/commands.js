@@ -530,40 +530,46 @@ async function sendPartyStats(ctx) {
 	await ctx.replyWithHTML(`<blockquote><b>Совместные игры в турбо (месяц)</b>\n\n${lines.join('\n')}</blockquote>`);
 }
 
-async function sendChallenge(ctx) {
+async function generateChallenge(ctx, playerId) {
 	const OpenAI = require('openai');
 	const client = new OpenAI();
 
 	const playersMap = await storage.getPlayers();
 	const heroes = await storage.getHeroes();
-	const playerIds = Object.keys(playersMap);
 
-	const heroResponses = await Promise.all(playerIds.map(id => fetchPlayerHeroesStats(id)));
+	const isRandom = playerId === 'random';
+	const targetIds = isRandom ? Object.keys(playersMap) : [playerId];
+
+	const heroResponses = await Promise.all(targetIds.map(id => fetchPlayerHeroesStats(id)));
 	const playerContext = heroResponses.map((heroPerf, idx) => {
-		const name = playersMap[playerIds[idx]].name;
+		const name = playersMap[targetIds[idx]]?.name || 'Unknown';
 		if (!heroPerf || !heroPerf.length) return `${name}: нет данных`;
-		const topHeroes = heroPerf.sort((a, b) => b.matchCount - a.matchCount).slice(0, 5);
+		const topHeroes = heroPerf.sort((a, b) => b.matchCount - a.matchCount).slice(0, 10);
 		const heroList = topHeroes.map(h => `${heroes[h.heroId]?.displayName || '???'} (${h.matchCount} игр, ${(h.winCount / h.matchCount * 100).toFixed(0)}%)`).join(', ');
 		return `${name}: ${heroList}`;
 	}).join('\n');
+
+	const targetName = isRandom ? null : playersMap[playerId]?.name;
+	const systemPrompt = isRandom
+		? 'Ты — ведущий челленджей для группы друзей, играющих в Dota 2 Turbo. Генерируй один креативный, смешной челлендж на основе статистики игроков. Челлендж должен быть выполним за 1-3 игры. Можешь назначить конкретного игрока или всю группу. Используй знание героев и механик Dota 2. Отвечай на русском, кратко (2-4 предложения). Не используй markdown.'
+		: 'Ты — ведущий челленджей для группы друзей, играющих в Dota 2 Turbo. Генерируй один креативный, смешной персональный челлендж для конкретного игрока на основе его статистики. Челлендж должен быть выполним за 1-3 игры. Используй знание героев и механик Dota 2. Обращайся к игроку по имени. Отвечай на русском, кратко (2-4 предложения). Не используй markdown.';
+
+	const userPrompt = isRandom
+		? `Статистика игроков (топ-10 героев в турбо):\n${playerContext}\n\nСгенерируй один челлендж.`
+		: `Статистика игрока (топ-10 героев в турбо):\n${playerContext}\n\nСгенерируй один персональный челлендж для ${targetName}.`;
 
 	const response = await client.chat.completions.create({
 		model: 'gpt-4o-mini',
 		max_tokens: 300,
 		messages: [
-			{
-				role: 'system',
-				content: `Ты — ведущий челленджей для группы друзей, играющих в Dota 2 Turbo. Генерируй один креативный, смешной челлендж на основе статистики игроков. Челлендж должен быть выполним за 1-3 игры. Можешь назначить конкретного игрока или всю группу. Используй знание героев и механик Dota 2. Отвечай на русском, кратко (2-4 предложения). Не используй markdown.`
-			},
-			{
-				role: 'user',
-				content: `Статистика игроков (топ-5 героев в турбо):\n${playerContext}\n\nСгенерируй один челлендж.`
-			}
+			{ role: 'system', content: systemPrompt },
+			{ role: 'user', content: userPrompt }
 		]
 	});
 
 	const challenge = response.choices[0].message.content;
-	await ctx.replyWithHTML(`<blockquote><b>🎲 Челлендж</b>\n\n${challenge}</blockquote>`);
+	const title = isRandom ? '🎲 Челлендж' : `🎲 Челлендж для ${targetName}`;
+	await ctx.replyWithHTML(`<blockquote><b>${title}</b>\n\n${challenge}</blockquote>`);
 }
 
 module.exports = {
@@ -577,7 +583,7 @@ module.exports = {
 	sendHeroesStats,
 	sendStreaks,
 	sendPartyStats,
-	sendChallenge,
+	generateChallenge,
 	deleteMessage,
 	deleteAction
 };

@@ -13,7 +13,7 @@ const {
 	sendHeroesStats,
 	sendStreaks,
 	sendPartyStats,
-	sendChallenge,
+	generateChallenge,
 	deleteMessage,
 	deleteAction,
 } = require('./commands');
@@ -82,7 +82,19 @@ bot.command('streak', safeCommand((ctx) => sendStreaks(ctx)));
 bot.command('party', safeCommand((ctx) => sendPartyStats(ctx)));
 bot.command('week', safeCommand((ctx) => sendReport(ctx, 'week')));
 
-bot.command('challenge', safeCommand((ctx) => sendChallenge(ctx)));
+bot.command('challenge', safeCommand(async (ctx) => {
+	const playersData = await storage.getPlayers();
+	const playerButtons = Object.entries(playersData).map(([id, data]) =>
+		[Markup.button.callback(data.name, `ch:${id}`)]
+	);
+	await ctx.reply(
+		'Кому челлендж?',
+		Markup.inlineKeyboard([
+			[Markup.button.callback('🎲 Рандом', 'ch:random')],
+			...playerButtons
+		])
+	);
+}));
 
 bot.command('all', safeCommand(async (ctx) => {
 	const { TELEGRAM_USERNAMES } = require('./constants');
@@ -142,6 +154,17 @@ bot.action(/match:(\d+):(\d+)/, async (ctx) => {
 		await sendMatchDetails(ctx, matchId, playerId);
 	} catch (err) {
 		console.log('match error:', err.message);
+		try { await ctx.replyWithHTML(`<blockquote>Ошибка: ${err.message}</blockquote>`); } catch (_) {}
+	}
+});
+
+bot.action(/ch:(.+)/, async (ctx) => {
+	try {
+		await ctx.answerCbQuery();
+		await deleteAction(ctx);
+		await generateChallenge(ctx, ctx.match[1]);
+	} catch (err) {
+		console.log('challenge error:', err.message);
 		try { await ctx.replyWithHTML(`<blockquote>Ошибка: ${err.message}</blockquote>`); } catch (_) {}
 	}
 });
