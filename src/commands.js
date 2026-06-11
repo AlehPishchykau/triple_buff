@@ -874,7 +874,7 @@ ${playerList}
 	});
 
 	const answer = step2.choices[0].message.content;
-	await ctx.replyWithHTML(`<blockquote>${answer}</blockquote>`);
+	await ctx.replyWithHTML(`<blockquote><b>❓ ${question}</b>\n\n${answer}</blockquote>`);
 }
 
 module.exports = {
