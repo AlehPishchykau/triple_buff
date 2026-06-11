@@ -58,11 +58,16 @@ function convertMiliseconds(miliseconds, format) {
 	}
 }
 
+function escapeHTML(text) {
+	return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 module.exports = {
 	openDotaGet,
 	openDotaPost,
 	isTurbo,
 	isWin,
 	secondsToTime,
-	convertMiliseconds
+	convertMiliseconds,
+	escapeHTML
 };

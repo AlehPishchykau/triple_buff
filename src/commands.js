@@ -11,7 +11,7 @@ const {
 	fetchPeers,
 } = require('./requests');
 const { storage } = require('./storage');
-const { secondsToTime, convertMiliseconds, isWin } = require('./utils');
+const { secondsToTime, convertMiliseconds, isWin, escapeHTML } = require('./utils');
 
 const PERIOD_LABELS = {
 	yesterday: 'Вчерашние матчи',
@@ -874,7 +874,7 @@ ${playerList}
 	});
 
 	const answer = step2.choices[0].message.content;
-	await ctx.replyWithHTML(`<blockquote><b>❓ ${question}</b>\n\n${answer}</blockquote>`);
+	await ctx.replyWithHTML(`<blockquote><b>❓ ${escapeHTML(question)}</b>\n\n${escapeHTML(answer)}</blockquote>`);
 }
 
 module.exports = {
