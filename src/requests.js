@@ -105,6 +105,10 @@ async function fetchHeroes() {
 	return result;
 }
 
+async function fetchPlayerTotals(playerId) {
+	return openDotaGet(`/players/${playerId}/totals?${TURBO_FILTER}`);
+}
+
 async function fetchGameModes() {
 	return openDotaGet('/constants/game_mode');
 }
@@ -122,5 +126,6 @@ module.exports = {
 	fetchLastMatchData,
 	fetchPeers,
 	fetchHeroes,
+	fetchPlayerTotals,
 	fetchGameModes
 };

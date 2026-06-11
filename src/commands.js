@@ -9,6 +9,7 @@ const {
 	fetchMatchDetail,
 	fetchLastMatchData,
 	fetchPeers,
+	fetchPlayerTotals,
 } = require('./requests');
 const { storage } = require('./storage');
 const { secondsToTime, convertMiliseconds, isWin, escapeHTML } = require('./utils');
@@ -743,6 +744,18 @@ const ASK_TOOLS = [
 			}
 		}
 	},
+	{
+		type: 'function',
+		function: {
+			name: 'get_player_totals',
+			description: 'Aggregated totals for a player in turbo: kills, deaths, assists, gold_per_min, xp_per_min, hero_damage, tower_damage, last_hits, duration, etc. Each field has sum and n (count).',
+			parameters: {
+				type: 'object',
+				properties: { player_id: { type: 'string' } },
+				required: ['player_id']
+			}
+		}
+	},
 ];
 
 const ASK_TOOL_HANDLERS = {
@@ -810,6 +823,19 @@ const ASK_TOOL_HANDLERS = {
 				gpm: p.gold_per_min, team: p.player_slot < 128 ? 'radiant' : 'dire',
 			}))
 		};
+	},
+	get_player_totals: async (args, _heroes, playersMap) => {
+		const name = playersMap[args.player_id]?.name || args.player_id;
+		const totals = await fetchPlayerTotals(args.player_id);
+		const useful = ['kills', 'deaths', 'assists', 'gold_per_min', 'xp_per_min',
+			'hero_damage', 'tower_damage', 'last_hits', 'duration', 'level'];
+		const filtered = {};
+		totals.forEach(t => {
+			if (useful.includes(t.field)) {
+				filtered[t.field] = { total: t.sum, games: t.n, avg: t.n > 0 ? Math.round(t.sum / t.n) : 0 };
+			}
+		});
+		return { player: name, totals: filtered };
 	},
 };
 
