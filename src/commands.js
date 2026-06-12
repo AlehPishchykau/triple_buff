@@ -714,12 +714,13 @@ const ASK_TOOLS = [
 		type: 'function',
 		function: {
 			name: 'get_recent_matches',
-			description: 'Last N turbo matches for a player. Returns hero, kills, deaths, assists, gpm, xpm, duration, win/loss.',
+			description: 'Recent turbo matches for a player. Use days param to filter by time (e.g. days=1 for yesterday). Returns hero, kills, deaths, assists, gpm, xpm, duration, win/loss, date.',
 			parameters: {
 				type: 'object',
 				properties: {
 					player_id: { type: 'string' },
-					count: { type: 'number', description: 'How many matches (max 20)' }
+					count: { type: 'number', description: 'How many matches (max 20)' },
+					days: { type: 'number', description: 'Only return matches from last N days (e.g. 1 = last 24h)' }
 				},
 				required: ['player_id']
 			}
@@ -785,9 +786,14 @@ const ASK_TOOL_HANDLERS = {
 	get_recent_matches: async (args, heroes, playersMap) => {
 		const name = playersMap[args.player_id]?.name || args.player_id;
 		const count = Math.min(args.count || 10, 20);
-		const matches = await fetchRecentMatches(args.player_id, count);
+		let matches = await fetchRecentMatches(args.player_id, count);
+		if (args.days) {
+			const cutoff = Math.floor(Date.now() / 1000) - args.days * 86400;
+			matches = matches.filter(m => m.start_time >= cutoff);
+		}
 		return {
 			player: name,
+			match_count: matches.length,
 			matches: matches.map(m => ({
 				match_id: m.match_id,
 				hero: heroes[m.hero_id]?.displayName || m.hero_id,
@@ -795,6 +801,7 @@ const ASK_TOOL_HANDLERS = {
 				kills: m.kills, deaths: m.deaths, assists: m.assists,
 				gpm: m.gold_per_min, xpm: m.xp_per_min,
 				duration_min: Math.round(m.duration / 60),
+				date: new Date(m.start_time * 1000).toLocaleDateString('ru-RU'),
 			}))
 		};
 	},
