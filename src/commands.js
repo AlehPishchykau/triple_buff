@@ -765,6 +765,17 @@ const ASK_TOOLS = [
 	{
 		type: 'function',
 		function: {
+			name: 'get_last_group_match',
+			description: 'Find the most recent turbo match played by any tracked player. Returns full match details with all 10 players, marking tracked ones. Use for "last game", "latest match", "последняя катка". Matches with same match_id from different players are the same game.',
+			parameters: {
+				type: 'object',
+				properties: {},
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
 			name: 'web_search',
 			description: 'Search the internet for current info (meta, patches, builds, pro scene, anything not in your training data). Use when you need up-to-date information.',
 			parameters: {
@@ -862,6 +873,40 @@ const ASK_TOOL_HANDLERS = {
 			}
 		});
 		return { player: name, totals: filtered };
+	},
+	get_last_group_match: async (_args, heroes, playersMap) => {
+		const playerIds = Object.keys(playersMap);
+		const allMatches = await Promise.all(playerIds.map(id => fetchRecentMatches(id, 10)));
+		const matchPlayers = {};
+		allMatches.forEach((matches, idx) => {
+			matches.forEach(m => {
+				if (!matchPlayers[m.match_id]) matchPlayers[m.match_id] = { time: m.start_time, players: [] };
+				matchPlayers[m.match_id].players.push(playerIds[idx]);
+			});
+		});
+		const groupMatches = Object.entries(matchPlayers)
+			.sort((a, b) => b[1].time - a[1].time);
+		if (!groupMatches.length) return { error: 'No recent matches found' };
+		const matchId = groupMatches[0][0];
+		const match = await fetchMatchDetail(matchId);
+		if (!match) return { error: 'Match details unavailable' };
+		const trackedIds = new Set(playerIds.map(Number));
+		return {
+			match_id: match.match_id,
+			duration_min: Math.round(match.duration / 60),
+			radiant_win: match.radiant_win,
+			date: new Date(match.start_time * 1000).toLocaleDateString('ru-RU'),
+			players: match.players.map(p => ({
+				name: playersMap[String(p.account_id)]?.name || p.personaname || '???',
+				is_tracked: trackedIds.has(p.account_id),
+				hero: heroes[p.hero_id]?.displayName || '???',
+				team: p.player_slot < 128 ? 'radiant' : 'dire',
+				win: p.radiant_win === (p.player_slot < 128),
+				kills: p.kills, deaths: p.deaths, assists: p.assists,
+				gpm: p.gold_per_min, networth: p.net_worth || p.total_gold,
+				hero_damage: p.hero_damage, tower_damage: p.tower_damage,
+			}))
+		};
 	},
 	web_search: async (args) => {
 		try {
