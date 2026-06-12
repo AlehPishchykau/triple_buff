@@ -865,21 +865,14 @@ const ASK_TOOL_HANDLERS = {
 	},
 	web_search: async (args) => {
 		try {
-			const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`;
-			const res = await fetch(url, {
-				headers: { 'User-Agent': 'Mozilla/5.0 (compatible; DotaBot/1.0)' }
+			const OpenAI = require('openai');
+			const client = new OpenAI();
+			const response = await client.responses.create({
+				model: 'gpt-4.1-mini',
+				tools: [{ type: 'web_search_preview' }],
+				input: args.query,
 			});
-			const html = await res.text();
-			const snippets = [];
-			const regex = /<a[^>]*class="result__a"[^>]*>([^<]*)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
-			let match;
-			while ((match = regex.exec(html)) !== null && snippets.length < 5) {
-				const title = match[1].replace(/<[^>]+>/g, '').trim();
-				const snippet = match[2].replace(/<[^>]+>/g, '').trim();
-				if (title && snippet) snippets.push({ title, snippet });
-			}
-			if (!snippets.length) return { results: 'No results found' };
-			return { results: snippets };
+			return { results: response.output_text };
 		} catch (err) {
 			return { error: err.message };
 		}
