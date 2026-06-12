@@ -762,6 +762,20 @@ const ASK_TOOLS = [
 			}
 		}
 	},
+	{
+		type: 'function',
+		function: {
+			name: 'web_search',
+			description: 'Search the internet for current info (meta, patches, builds, pro scene, anything not in your training data). Use when you need up-to-date information.',
+			parameters: {
+				type: 'object',
+				properties: {
+					query: { type: 'string', description: 'Search query in English for best results' }
+				},
+				required: ['query']
+			}
+		}
+	},
 ];
 
 const ASK_TOOL_HANDLERS = {
@@ -848,6 +862,27 @@ const ASK_TOOL_HANDLERS = {
 			}
 		});
 		return { player: name, totals: filtered };
+	},
+	web_search: async (args) => {
+		try {
+			const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`;
+			const res = await fetch(url, {
+				headers: { 'User-Agent': 'Mozilla/5.0 (compatible; DotaBot/1.0)' }
+			});
+			const html = await res.text();
+			const snippets = [];
+			const regex = /<a[^>]*class="result__a"[^>]*>([^<]*)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+			let match;
+			while ((match = regex.exec(html)) !== null && snippets.length < 5) {
+				const title = match[1].replace(/<[^>]+>/g, '').trim();
+				const snippet = match[2].replace(/<[^>]+>/g, '').trim();
+				if (title && snippet) snippets.push({ title, snippet });
+			}
+			if (!snippets.length) return { results: 'No results found' };
+			return { results: snippets };
+		} catch (err) {
+			return { error: err.message };
+		}
 	},
 };
 
