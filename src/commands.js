@@ -13,6 +13,7 @@ const {
 } = require('./requests');
 const { storage } = require('./storage');
 const { secondsToTime, convertMiliseconds, isWin, escapeHTML } = require('./utils');
+const { GPT_MODEL, GPT_MODEL_MINI } = process.env;
 
 const PERIOD_LABELS = {
 	yesterday: 'Вчерашние матчи',
@@ -589,7 +590,7 @@ async function generateChallenge(ctx, playerId) {
 		: `Статистика игрока (топ герои в турбо):\n${playerContext}\n\nОдин челлендж для ${targetName}.`;
 
 	const response = await client.chat.completions.create({
-		model: 'gpt-4.1-mini',
+		model: GPT_MODEL_MINI,
 		max_tokens: 200,
 		messages: [
 			{ role: 'system', content: systemPrompt },
@@ -654,7 +655,7 @@ async function generateAIReport(data, playersMap, heroes, period) {
 		const OpenAI = require('openai');
 		const client = new OpenAI();
 		const response = await client.chat.completions.create({
-			model: 'gpt-4.1-mini',
+			model: GPT_MODEL,
 			max_tokens: 600,
 			messages: [
 				{ role: 'system', content: `Ты — дерзкий комментатор Dota 2 для чата друзей. Пиши на русском. Твоя личность — Билли Херрингтон. Не упоминай гачи напрямую, просто вставляй реплики из гачи-видео как свои фразы (1-3 за текст, к месту).
@@ -914,7 +915,7 @@ const ASK_TOOL_HANDLERS = {
 			const OpenAI = require('openai');
 			const client = new OpenAI();
 			const response = await client.responses.create({
-				model: 'gpt-4.1-mini',
+				model: GPT_MODEL_MINI,
 				tools: [{ type: 'web_search_preview' }],
 				input: args.query,
 			});
@@ -998,7 +999,7 @@ ${playerList}
 	];
 
 	const step1 = await client.chat.completions.create({
-		model: 'gpt-4.1-mini',
+		model: GPT_MODEL_MINI,
 		max_tokens: 300,
 		messages,
 		tools: ASK_TOOLS,
@@ -1036,7 +1037,7 @@ ${playerList}
 	});
 
 	const step2 = await client.chat.completions.create({
-		model: 'gpt-4.1-mini',
+		model: GPT_MODEL,
 		max_tokens: 800,
 		messages: [
 			...messages,
@@ -1053,7 +1054,7 @@ ${playerList}
 
 async function runAskWithTools(client, messages, heroes, playersMap) {
 	const step1 = await client.chat.completions.create({
-		model: 'gpt-4.1-mini',
+		model: GPT_MODEL_MINI,
 		max_tokens: 300,
 		messages,
 		tools: ASK_TOOLS,
@@ -1088,7 +1089,7 @@ async function runAskWithTools(client, messages, heroes, playersMap) {
 	});
 
 	const step2 = await client.chat.completions.create({
-		model: 'gpt-4.1-mini',
+		model: GPT_MODEL,
 		max_tokens: 800,
 		messages: [
 			...messages,
@@ -1154,7 +1155,7 @@ async function generateMatchAnalysis(match, playerId, playersMap, heroes) {
 		const OpenAI = require('openai');
 		const client = new OpenAI();
 		const response = await client.chat.completions.create({
-			model: 'gpt-4.1-mini',
+			model: GPT_MODEL,
 			max_tokens: 600,
 			messages: [
 				{ role: 'system', content: `Ты — аналитик Dota 2. Напиши краткий разбор матча на русском с матами и сленгом. Твоя личность — Билли Херрингтон. Не упоминай гачи напрямую, просто вставляй реплики из гачи-видео как свои фразы (1-2 за текст, к месту). Тон — дерзкий и циничный, без позитивщины, никаких "герой!", "молодцы!", "жги!".
