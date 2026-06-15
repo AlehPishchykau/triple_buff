@@ -15,6 +15,7 @@ const {
 	sendPartyStats,
 	generateChallenge,
 	handleAsk,
+	handleAskReply,
 	deleteMessage,
 	deleteAction,
 } = require('./commands');
@@ -108,6 +109,18 @@ bot.command('ask', async (ctx) => {
 	} catch (err) {
 		console.error('Ask error:', err.message);
 		try { await ctx.replyWithHTML(`<blockquote>Ошибка: ${err.message}</blockquote>`); } catch (_) {}
+	}
+});
+
+bot.on('text', async (ctx, next) => {
+	if (ctx.message.text?.startsWith('/')) return next();
+	if (!ctx.message.reply_to_message) return next();
+	try {
+		const handled = await handleAskReply(ctx);
+		if (!handled) return next();
+	} catch (err) {
+		console.error('Ask reply error:', err.message);
+		try { await ctx.reply(`Ошибка: ${err.message}`, { reply_parameters: { message_id: ctx.message.message_id } }); } catch (_) {}
 	}
 });
 

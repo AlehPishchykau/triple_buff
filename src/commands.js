@@ -924,6 +924,24 @@ const ASK_TOOL_HANDLERS = {
 	},
 };
 
+const askChatHistory = new Map();
+const ASK_HISTORY_TTL = 60 * 60 * 1000;
+const ASK_HISTORY_MAX = 200;
+
+function pruneAskHistory() {
+	if (askChatHistory.size <= ASK_HISTORY_MAX) return;
+	const now = Date.now();
+	for (const [id, entry] of askChatHistory) {
+		if (now - entry.ts > ASK_HISTORY_TTL) askChatHistory.delete(id);
+	}
+	if (askChatHistory.size > ASK_HISTORY_MAX) {
+		const oldest = [...askChatHistory.entries()].sort((a, b) => a[1].ts - b[1].ts);
+		while (askChatHistory.size > ASK_HISTORY_MAX) {
+			askChatHistory.delete(oldest.shift()[0]);
+		}
+	}
+}
+
 async function handleAsk(ctx) {
 	const messageId = ctx.message.message_id;
 	const reply = (text) => ctx.reply(text, { reply_parameters: { message_id: messageId } });
@@ -983,7 +1001,11 @@ ${playerList}
 	const choice = step1.choices[0];
 
 	if (!choice.message.tool_calls || !choice.message.tool_calls.length) {
-		await reply(choice.message.content || 'Не понял вопрос. Попробуй переформулировать.');
+		const answer = choice.message.content || 'Не понял вопрос. Попробуй переформулировать.';
+		const sent = await reply(answer);
+		messages.push({ role: 'assistant', content: answer });
+		askChatHistory.set(sent.message_id, { messages, ts: Date.now() });
+		pruneAskHistory();
 		return;
 	}
 
@@ -1017,7 +1039,85 @@ ${playerList}
 	});
 
 	const answer = step2.choices[0].message.content;
-	await reply(answer);
+	messages.push({ role: 'assistant', content: answer });
+	const sent = await reply(answer);
+	askChatHistory.set(sent.message_id, { messages, ts: Date.now() });
+	pruneAskHistory();
+}
+
+async function runAskWithTools(client, messages, heroes, playersMap) {
+	const step1 = await client.chat.completions.create({
+		model: 'gpt-4.1-mini',
+		max_tokens: 300,
+		messages,
+		tools: ASK_TOOLS,
+	});
+
+	const choice = step1.choices[0];
+
+	if (!choice.message.tool_calls || !choice.message.tool_calls.length) {
+		const answer = choice.message.content || '';
+		messages.push({ role: 'assistant', content: answer });
+		return answer;
+	}
+
+	messages.push(choice.message);
+
+	const toolResults = await Promise.all(
+		choice.message.tool_calls.map(async (tc) => {
+			const handler = ASK_TOOL_HANDLERS[tc.function.name];
+			if (!handler) return { tool_call_id: tc.id, content: '{"error":"unknown function"}' };
+			try {
+				const args = JSON.parse(tc.function.arguments);
+				const result = await handler(args, heroes, playersMap);
+				return { tool_call_id: tc.id, content: JSON.stringify(result) };
+			} catch (err) {
+				return { tool_call_id: tc.id, content: JSON.stringify({ error: err.message }) };
+			}
+		})
+	);
+
+	toolResults.forEach(tr => {
+		messages.push({ role: 'tool', tool_call_id: tr.tool_call_id, content: tr.content });
+	});
+
+	const step2 = await client.chat.completions.create({
+		model: 'gpt-4.1-mini',
+		max_tokens: 800,
+		messages: [
+			...messages,
+			{ role: 'system', content: 'Ответь на вопрос по полученным данным. Грамотный русский, живо и с юмором. Мат к месту, не в каждом слове. Правильная дота-терминология (официальные английские названия героев/итемов). НЕ транслитерируй английские слова кириллицей — пиши по-русски или оставляй английское слово как есть. Кратко и по делу. Plain text без форматирования.' }
+		],
+	});
+
+	const answer = step2.choices[0].message.content;
+	messages.push({ role: 'assistant', content: answer });
+	return answer;
+}
+
+async function handleAskReply(ctx) {
+	const replyToId = ctx.message.reply_to_message?.message_id;
+	const history = askChatHistory.get(replyToId);
+	if (!history) return false;
+
+	const messageId = ctx.message.message_id;
+	const reply = (text) => ctx.reply(text, { reply_parameters: { message_id: messageId } });
+	const question = ctx.message.text?.trim();
+	if (!question) return false;
+
+	const OpenAI = require('openai');
+	const client = new OpenAI();
+	const playersMap = await storage.getPlayers();
+	const heroes = await storage.getHeroes();
+
+	const prev = history.messages.filter(m => m.role === 'system' || m.role === 'user' || (m.role === 'assistant' && typeof m.content === 'string'));
+	const messages = [...prev, { role: 'user', content: question }];
+
+	const answer = await runAskWithTools(client, messages, heroes, playersMap);
+	const sent = await reply(answer);
+	askChatHistory.set(sent.message_id, { messages, ts: Date.now() });
+	pruneAskHistory();
+	return true;
 }
 
 async function generateMatchAnalysis(match, playerId, playersMap, heroes) {
@@ -1077,6 +1177,7 @@ module.exports = {
 	sendPartyStats,
 	generateChallenge,
 	handleAsk,
+	handleAskReply,
 	deleteMessage,
 	deleteAction
 };
