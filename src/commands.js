@@ -955,8 +955,15 @@ async function handleAsk(ctx) {
 
 	const OpenAI = require('openai');
 	const client = new OpenAI();
-	const playersMap = await storage.getPlayers();
-	const heroes = await storage.getHeroes();
+	let playersMap, heroes;
+	try {
+		playersMap = await storage.getPlayers();
+		heroes = await storage.getHeroes();
+	} catch (err) {
+		console.error('Storage fetch failed:', err.message);
+		playersMap = {};
+		heroes = {};
+	}
 
 	const playerList = Object.entries(playersMap)
 		.map(([id, data]) => {
@@ -1118,8 +1125,15 @@ async function handleAskReply(ctx) {
 
 	const OpenAI = require('openai');
 	const client = new OpenAI();
-	const playersMap = await storage.getPlayers();
-	const heroes = await storage.getHeroes();
+	let playersMap, heroes;
+	try {
+		playersMap = await storage.getPlayers();
+		heroes = await storage.getHeroes();
+	} catch (err) {
+		console.error('Storage fetch failed:', err.message);
+		playersMap = {};
+		heroes = {};
+	}
 
 	const prev = history.messages.filter(m => m.role === 'system' || m.role === 'user' || (m.role === 'assistant' && typeof m.content === 'string'));
 	const messages = [...prev, { role: 'user', content: question }];
