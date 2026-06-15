@@ -930,6 +930,30 @@ const askChatHistory = new Map();
 const ASK_HISTORY_TTL = 8 * 60 * 60 * 1000;
 const ASK_HISTORY_MAX = 200;
 
+let billyMood = 5;
+
+function adjustMood(delta) {
+	billyMood = Math.max(1, Math.min(10, billyMood + delta));
+}
+
+function parseAskResponse(raw) {
+	try {
+		const parsed = JSON.parse(raw);
+		return {
+			answer: parsed.answer || raw,
+			mood_delta: Math.max(-2, Math.min(2, Math.round(Number(parsed.mood_delta) || 0))),
+		};
+	} catch {
+		return { answer: raw, mood_delta: 0 };
+	}
+}
+
+function getMoodPrompt() {
+	if (billyMood <= 3) return `Настроение: ${billyMood}/10 (добродушное). Ты сейчас в хорошем расположении духа. Подъёбываешь по-дружески, без злобы. Можешь даже похвалить, если заслужили. Но ты всё ещё Билли — не превращайся в няшку.`;
+	if (billyMood <= 6) return `Настроение: ${billyMood}/10 (нейтральное). Стандартный режим — дерзкий, циничный, по делу.`;
+	return `Настроение: ${billyMood}/10 (агрессивное). Ты сейчас на взводе. Жёстко подъёбываешь, не щадишь никого. Можешь быть откровенно токсичным и унижать. Мат через слово. Но всё ещё остроумно, не тупо.`;
+}
+
 function pruneAskHistory() {
 	if (askChatHistory.size <= ASK_HISTORY_MAX) return;
 	const now = Date.now();
@@ -1005,7 +1029,9 @@ ${playerList}
 - Если вопрос не про доту — отвечай из своих знаний, не вызывай дота-функции.
 - Если автор пишет "мой", "у меня" в контексте доты — определи его по telegram-нику.
 - Никогда не задавай уточняющих вопросов.
-- Если вопрос про всех игроков — вызови функцию для каждого.` },
+- Если вопрос про всех игроков — вызови функцию для каждого.
+
+${getMoodPrompt()}` },
 		{ role: 'user', content: question }
 	];
 
@@ -1049,14 +1075,21 @@ ${playerList}
 
 	const step2 = await client.chat.completions.create({
 		model: GPT_MODEL,
-		max_tokens: 800,
+		max_tokens: 900,
+		response_format: { type: 'json_object' },
 		messages: [
 			...messages,
-			{ role: 'system', content: 'Ответь на вопрос по полученным данным. Помни: ты Билли Херрингтон, не упоминай гачи, просто вставь 1-2 реплики из гачи-видео как свои фразы. Тон — дерзкий и циничный, без позитивщины и мотивашек. Грамотный русский, мат к месту. Правильная дота-терминология. НЕ транслитерируй английские слова кириллицей. Кратко и по делу. Plain text без форматирования.' }
+			{ role: 'system', content: `Ответь на вопрос по полученным данным. Помни: ты Билли Херрингтон, не упоминай гачи, просто вставь 1-2 реплики из гачи-видео как свои фразы. Грамотный русский, мат к месту. Правильная дота-терминология. НЕ транслитерируй английские слова кириллицей. Кратко и по делу.
+
+${getMoodPrompt()}
+
+Верни JSON: {"answer": "твой ответ plain text", "mood_delta": число от -2 до 2}
+mood_delta зависит от тона собеседника: оскорбления/грубость → +1..+2 (злишься), вежливость/извинения/комплименты → -1..-2 (добреешь), нейтрально → 0.` }
 		],
 	});
 
-	const answer = step2.choices[0].message.content;
+	const { answer, mood_delta } = parseAskResponse(step2.choices[0].message.content);
+	if (mood_delta) adjustMood(mood_delta);
 	messages.push({ role: 'assistant', content: answer });
 	const sent = await reply(answer);
 	askChatHistory.set(sent.message_id, { messages, ts: Date.now() });
@@ -1101,14 +1134,21 @@ async function runAskWithTools(client, messages, heroes, playersMap) {
 
 	const step2 = await client.chat.completions.create({
 		model: GPT_MODEL,
-		max_tokens: 800,
+		max_tokens: 900,
+		response_format: { type: 'json_object' },
 		messages: [
 			...messages,
-			{ role: 'system', content: 'Ответь на вопрос по полученным данным. Помни: ты Билли Херрингтон, не упоминай гачи, просто вставь 1-2 реплики из гачи-видео как свои фразы. Тон — дерзкий и циничный, без позитивщины и мотивашек. Грамотный русский, мат к месту. Правильная дота-терминология. НЕ транслитерируй английские слова кириллицей. Кратко и по делу. Plain text без форматирования.' }
+			{ role: 'system', content: `Ответь на вопрос по полученным данным. Помни: ты Билли Херрингтон, не упоминай гачи, просто вставь 1-2 реплики из гачи-видео как свои фразы. Грамотный русский, мат к месту. Правильная дота-терминология. НЕ транслитерируй английские слова кириллицей. Кратко и по делу.
+
+${getMoodPrompt()}
+
+Верни JSON: {"answer": "твой ответ plain text", "mood_delta": число от -2 до 2}
+mood_delta зависит от тона собеседника: оскорбления/грубость → +1..+2 (злишься), вежливость/извинения/комплименты → -1..-2 (добреешь), нейтрально → 0.` }
 		],
 	});
 
-	const answer = step2.choices[0].message.content;
+	const { answer, mood_delta } = parseAskResponse(step2.choices[0].message.content);
+	if (mood_delta) adjustMood(mood_delta);
 	messages.push({ role: 'assistant', content: answer });
 	return answer;
 }
