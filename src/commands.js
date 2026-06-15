@@ -933,7 +933,9 @@ const ASK_HISTORY_MAX = 200;
 let billyMood = 5;
 
 function adjustMood(delta) {
+	const prev = billyMood;
 	billyMood = Math.max(1, Math.min(10, billyMood + delta));
+	console.log(`Mood: ${prev} → ${billyMood} (delta: ${delta > 0 ? '+' : ''}${delta})`);
 }
 
 function parseAskResponse(raw) {
@@ -1044,34 +1046,27 @@ ${getMoodPrompt()}` },
 
 	const choice = step1.choices[0];
 
-	if (!choice.message.tool_calls || !choice.message.tool_calls.length) {
-		const answer = choice.message.content || 'Не понял вопрос. Попробуй переформулировать.';
-		const sent = await reply(answer);
-		messages.push({ role: 'assistant', content: answer });
-		askChatHistory.set(sent.message_id, { messages, ts: Date.now() });
-		pruneAskHistory();
-		return;
+	if (choice.message.tool_calls?.length) {
+		messages.push(choice.message);
+
+		const toolResults = await Promise.all(
+			choice.message.tool_calls.map(async (tc) => {
+				const handler = ASK_TOOL_HANDLERS[tc.function.name];
+				if (!handler) return { tool_call_id: tc.id, content: '{"error":"unknown function"}' };
+				try {
+					const args = JSON.parse(tc.function.arguments);
+					const result = await handler(args, heroes, playersMap);
+					return { tool_call_id: tc.id, content: JSON.stringify(result) };
+				} catch (err) {
+					return { tool_call_id: tc.id, content: JSON.stringify({ error: err.message }) };
+				}
+			})
+		);
+
+		toolResults.forEach(tr => {
+			messages.push({ role: 'tool', tool_call_id: tr.tool_call_id, content: tr.content });
+		});
 	}
-
-	messages.push(choice.message);
-
-	const toolResults = await Promise.all(
-		choice.message.tool_calls.map(async (tc) => {
-			const handler = ASK_TOOL_HANDLERS[tc.function.name];
-			if (!handler) return { tool_call_id: tc.id, content: '{"error":"unknown function"}' };
-			try {
-				const args = JSON.parse(tc.function.arguments);
-				const result = await handler(args, heroes, playersMap);
-				return { tool_call_id: tc.id, content: JSON.stringify(result) };
-			} catch (err) {
-				return { tool_call_id: tc.id, content: JSON.stringify({ error: err.message }) };
-			}
-		})
-	);
-
-	toolResults.forEach(tr => {
-		messages.push({ role: 'tool', tool_call_id: tr.tool_call_id, content: tr.content });
-	});
 
 	const step2 = await client.chat.completions.create({
 		model: GPT_MODEL,
@@ -1106,31 +1101,27 @@ async function runAskWithTools(client, messages, heroes, playersMap) {
 
 	const choice = step1.choices[0];
 
-	if (!choice.message.tool_calls || !choice.message.tool_calls.length) {
-		const answer = choice.message.content || '';
-		messages.push({ role: 'assistant', content: answer });
-		return answer;
+	if (choice.message.tool_calls?.length) {
+		messages.push(choice.message);
+
+		const toolResults = await Promise.all(
+			choice.message.tool_calls.map(async (tc) => {
+				const handler = ASK_TOOL_HANDLERS[tc.function.name];
+				if (!handler) return { tool_call_id: tc.id, content: '{"error":"unknown function"}' };
+				try {
+					const args = JSON.parse(tc.function.arguments);
+					const result = await handler(args, heroes, playersMap);
+					return { tool_call_id: tc.id, content: JSON.stringify(result) };
+				} catch (err) {
+					return { tool_call_id: tc.id, content: JSON.stringify({ error: err.message }) };
+				}
+			})
+		);
+
+		toolResults.forEach(tr => {
+			messages.push({ role: 'tool', tool_call_id: tr.tool_call_id, content: tr.content });
+		});
 	}
-
-	messages.push(choice.message);
-
-	const toolResults = await Promise.all(
-		choice.message.tool_calls.map(async (tc) => {
-			const handler = ASK_TOOL_HANDLERS[tc.function.name];
-			if (!handler) return { tool_call_id: tc.id, content: '{"error":"unknown function"}' };
-			try {
-				const args = JSON.parse(tc.function.arguments);
-				const result = await handler(args, heroes, playersMap);
-				return { tool_call_id: tc.id, content: JSON.stringify(result) };
-			} catch (err) {
-				return { tool_call_id: tc.id, content: JSON.stringify({ error: err.message }) };
-			}
-		})
-	);
-
-	toolResults.forEach(tr => {
-		messages.push({ role: 'tool', tool_call_id: tr.tool_call_id, content: tr.content });
-	});
 
 	const step2 = await client.chat.completions.create({
 		model: GPT_MODEL,
