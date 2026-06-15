@@ -926,7 +926,7 @@ const ASK_TOOL_HANDLERS = {
 };
 
 const askChatHistory = new Map();
-const ASK_HISTORY_TTL = 60 * 60 * 1000;
+const ASK_HISTORY_TTL = 8 * 60 * 60 * 1000;
 const ASK_HISTORY_MAX = 200;
 
 function pruneAskHistory() {
