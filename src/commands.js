@@ -1229,6 +1229,19 @@ async function generateMatchAnalysis(match, playerId, playersMap, heroes) {
 	}
 }
 
+function getDebugInfo() {
+	const moodLabel = billyMood <= 3 ? 'добродушное' : billyMood <= 6 ? 'нейтральное' : 'агрессивное';
+	const lines = [
+		`<b>Billy Debug</b>`,
+		``,
+		`Mood: ${billyMood}/10 (${moodLabel})`,
+		`Active reply chains: ${askChatHistory.size}`,
+		`Model (ответы): ${GPT_MODEL}`,
+		`Model (логика): ${GPT_MODEL_MINI}`,
+	];
+	return `<blockquote>${lines.join('\n')}</blockquote>`;
+}
+
 module.exports = {
 	sendReport,
 	sendPlayerWinrate,
@@ -1243,6 +1256,7 @@ module.exports = {
 	generateChallenge,
 	handleAsk,
 	handleAskReply,
+	getDebugInfo,
 	deleteMessage,
 	deleteAction
 };

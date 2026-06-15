@@ -16,6 +16,7 @@ const {
 	generateChallenge,
 	handleAsk,
 	handleAskReply,
+	getDebugInfo,
 	deleteMessage,
 	deleteAction,
 } = require('./commands');
@@ -113,6 +114,9 @@ const askHandler = async (ctx) => {
 };
 bot.command('ask', askHandler);
 bot.command('billy', askHandler);
+bot.command('debug', safeCommand(async (ctx) => {
+	await ctx.replyWithHTML(getDebugInfo());
+}));
 
 bot.on('text', async (ctx, next) => {
 	if (ctx.message.text?.startsWith('/')) return next();
