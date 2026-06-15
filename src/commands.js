@@ -1166,8 +1166,11 @@ async function handleAskReply(ctx) {
 		heroes = {};
 	}
 
+	const fromUser = ctx.message.from;
+	const authorTag = fromUser.username ? `@${fromUser.username}` : fromUser.first_name;
+
 	const prev = history.messages.filter(m => m.role === 'system' || m.role === 'user' || (m.role === 'assistant' && typeof m.content === 'string'));
-	const messages = [...prev, { role: 'user', content: question }];
+	const messages = [...prev, { role: 'user', content: `[${authorTag}]: ${question}` }];
 
 	const answer = await runAskWithTools(client, messages, heroes, playersMap);
 	const sent = await reply(answer);
