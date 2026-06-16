@@ -932,6 +932,25 @@ const ASK_HISTORY_MAX = 200;
 
 let billyMood = 5;
 const billyAttitude = new Map();
+const MOOD_BASELINE = 5;
+const DECAY_INTERVAL = 60 * 60 * 1000;
+
+function decayToBaseline() {
+	if (billyMood !== MOOD_BASELINE) {
+		const prev = billyMood;
+		billyMood += billyMood > MOOD_BASELINE ? -1 : 1;
+		console.log(`Mood decay: ${prev} → ${billyMood}`);
+	}
+	for (const [user, val] of billyAttitude) {
+		if (val !== MOOD_BASELINE) {
+			const prev = val;
+			billyAttitude.set(user, val + (val > MOOD_BASELINE ? -1 : 1));
+			console.log(`Attitude decay [${user}]: ${prev} → ${billyAttitude.get(user)}`);
+		}
+	}
+}
+
+setInterval(decayToBaseline, DECAY_INTERVAL);
 
 function getAttitude(user) {
 	if (!billyAttitude.has(user)) billyAttitude.set(user, 5);
