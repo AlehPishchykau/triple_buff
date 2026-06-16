@@ -941,13 +941,6 @@ function decayToBaseline() {
 		billyMood += billyMood > MOOD_BASELINE ? -1 : 1;
 		console.log(`Mood decay: ${prev} → ${billyMood}`);
 	}
-	for (const [user, val] of billyAttitude) {
-		if (val !== MOOD_BASELINE) {
-			const prev = val;
-			billyAttitude.set(user, val + (val > MOOD_BASELINE ? -1 : 1));
-			console.log(`Attitude decay [${user}]: ${prev} → ${billyAttitude.get(user)}`);
-		}
-	}
 }
 
 setInterval(decayToBaseline, DECAY_INTERVAL);
