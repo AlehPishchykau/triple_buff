@@ -969,7 +969,7 @@ function parseAskResponse(raw) {
 
 function getMoodPrompt(authorTag) {
 	const attitude = getAttitude(authorTag);
-	const effective = Math.round((billyMood + attitude) / 2);
+	const effective = Math.round((billyMood + attitude * 2) / 3);
 
 	let moodLine;
 	if (billyMood <= 3) moodLine = `Общее настроение: ${billyMood}/10 — ты в хорошем расположении духа.`;
