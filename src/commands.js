@@ -931,6 +931,12 @@ const ASK_HISTORY_TTL = 8 * 60 * 60 * 1000;
 const ASK_HISTORY_MAX = 200;
 
 let billyMood = 5;
+const billyAttitude = new Map();
+
+function getAttitude(user) {
+	if (!billyAttitude.has(user)) billyAttitude.set(user, 5);
+	return billyAttitude.get(user);
+}
 
 function adjustMood(delta) {
 	const prev = billyMood;
@@ -938,22 +944,49 @@ function adjustMood(delta) {
 	console.log(`Mood: ${prev} → ${billyMood} (delta: ${delta > 0 ? '+' : ''}${delta})`);
 }
 
+function adjustAttitude(user, delta) {
+	const prev = getAttitude(user);
+	billyAttitude.set(user, Math.max(1, Math.min(10, prev + delta)));
+	console.log(`Attitude [${user}]: ${prev} → ${billyAttitude.get(user)} (delta: ${delta > 0 ? '+' : ''}${delta})`);
+}
+
+function clampDelta(n) {
+	return Math.max(-2, Math.min(2, Math.round(Number(n) || 0)));
+}
+
 function parseAskResponse(raw) {
 	try {
 		const parsed = JSON.parse(raw);
 		return {
 			answer: parsed.answer || raw,
-			mood_delta: Math.max(-2, Math.min(2, Math.round(Number(parsed.mood_delta) || 0))),
+			mood_delta: clampDelta(parsed.mood_delta),
+			attitude_delta: clampDelta(parsed.attitude_delta),
 		};
 	} catch {
-		return { answer: raw, mood_delta: 0 };
+		return { answer: raw, mood_delta: 0, attitude_delta: 0 };
 	}
 }
 
-function getMoodPrompt() {
-	if (billyMood <= 3) return `Настроение: ${billyMood}/10 (добродушное). Ты сейчас в хорошем расположении духа. Подъёбываешь по-дружески, без злобы. Можешь даже похвалить, если заслужили. Но ты всё ещё Билли — не превращайся в няшку.`;
-	if (billyMood <= 6) return `Настроение: ${billyMood}/10 (нейтральное). Стандартный режим — дерзкий, циничный, по делу.`;
-	return `Настроение: ${billyMood}/10 (агрессивное). Ты сейчас на взводе. Жёстко подъёбываешь, не щадишь никого. Можешь быть откровенно токсичным и унижать. Мат через слово. Но всё ещё остроумно, не тупо.`;
+function getMoodPrompt(authorTag) {
+	const attitude = getAttitude(authorTag);
+	const effective = Math.round((billyMood + attitude) / 2);
+
+	let moodLine;
+	if (billyMood <= 3) moodLine = `Общее настроение: ${billyMood}/10 — ты в хорошем расположении духа.`;
+	else if (billyMood <= 6) moodLine = `Общее настроение: ${billyMood}/10 — стандартный режим.`;
+	else moodLine = `Общее настроение: ${billyMood}/10 — ты на взводе, раздражён.`;
+
+	let attitudeLine;
+	if (attitude <= 3) attitudeLine = `Отношение к ${authorTag}: ${attitude}/10 — тебе нравится этот человек, он заслужил уважение.`;
+	else if (attitude <= 6) attitudeLine = `Отношение к ${authorTag}: ${attitude}/10 — нейтральное, обычный чувак.`;
+	else attitudeLine = `Отношение к ${authorTag}: ${attitude}/10 — этот человек тебя бесит, ты его не уважаешь.`;
+
+	let styleLine;
+	if (effective <= 3) styleLine = 'Итог: подъёбывай по-дружески, без злобы. Можешь похвалить. Но не превращайся в няшку.';
+	else if (effective <= 6) styleLine = 'Итог: стандартный дерзкий и циничный режим.';
+	else styleLine = 'Итог: жёстко подъёбывай, не щади. Можешь быть откровенно токсичным. Мат через слово. Но остроумно.';
+
+	return `${moodLine}\n${attitudeLine}\n${styleLine}`;
 }
 
 function pruneAskHistory() {
@@ -1033,7 +1066,7 @@ ${playerList}
 - Никогда не задавай уточняющих вопросов.
 - Если вопрос про всех игроков — вызови функцию для каждого.
 
-${getMoodPrompt()}` },
+${getMoodPrompt(authorTag)}` },
 		{ role: 'user', content: question }
 	];
 
@@ -1076,22 +1109,24 @@ ${getMoodPrompt()}` },
 			...messages,
 			{ role: 'system', content: `Ответь на вопрос по полученным данным. Помни: ты Билли Херрингтон, не упоминай гачи, просто вставь 1-2 реплики из гачи-видео как свои фразы. Грамотный русский, мат к месту. Правильная дота-терминология. НЕ транслитерируй английские слова кириллицей. Кратко и по делу.
 
-${getMoodPrompt()}
+${getMoodPrompt(authorTag)}
 
-Верни JSON: {"answer": "твой ответ plain text", "mood_delta": число от -2 до 2}
-mood_delta зависит от тона собеседника: оскорбления/грубость → +1..+2 (злишься), вежливость/извинения/комплименты → -1..-2 (добреешь), нейтрально → 0.` }
+Верни JSON: {"answer": "твой ответ plain text", "mood_delta": число от -2 до 2, "attitude_delta": число от -2 до 2}
+mood_delta — изменение общего настроения. attitude_delta — изменение личного отношения к собеседнику.
+Оскорбления/грубость → +1..+2 (злишься, начинаешь презирать). Вежливость/извинения/комплименты → -1..-2 (добреешь, проникаешься уважением). Нейтрально → 0.` }
 		],
 	});
 
-	const { answer, mood_delta } = parseAskResponse(step2.choices[0].message.content);
+	const { answer, mood_delta, attitude_delta } = parseAskResponse(step2.choices[0].message.content);
 	if (mood_delta) adjustMood(mood_delta);
+	if (attitude_delta) adjustAttitude(authorTag, attitude_delta);
 	messages.push({ role: 'assistant', content: answer });
 	const sent = await reply(answer);
 	askChatHistory.set(sent.message_id, { messages, ts: Date.now() });
 	pruneAskHistory();
 }
 
-async function runAskWithTools(client, messages, heroes, playersMap) {
+async function runAskWithTools(client, messages, heroes, playersMap, authorTag) {
 	const step1 = await client.chat.completions.create({
 		model: GPT_MODEL_MINI,
 		max_tokens: 300,
@@ -1131,15 +1166,17 @@ async function runAskWithTools(client, messages, heroes, playersMap) {
 			...messages,
 			{ role: 'system', content: `Ответь на вопрос по полученным данным. Помни: ты Билли Херрингтон, не упоминай гачи, просто вставь 1-2 реплики из гачи-видео как свои фразы. Грамотный русский, мат к месту. Правильная дота-терминология. НЕ транслитерируй английские слова кириллицей. Кратко и по делу.
 
-${getMoodPrompt()}
+${getMoodPrompt(authorTag)}
 
-Верни JSON: {"answer": "твой ответ plain text", "mood_delta": число от -2 до 2}
-mood_delta зависит от тона собеседника: оскорбления/грубость → +1..+2 (злишься), вежливость/извинения/комплименты → -1..-2 (добреешь), нейтрально → 0.` }
+Верни JSON: {"answer": "твой ответ plain text", "mood_delta": число от -2 до 2, "attitude_delta": число от -2 до 2}
+mood_delta — изменение общего настроения. attitude_delta — изменение личного отношения к собеседнику.
+Оскорбления/грубость → +1..+2 (злишься, начинаешь презирать). Вежливость/извинения/комплименты → -1..-2 (добреешь, проникаешься уважением). Нейтрально → 0.` }
 		],
 	});
 
-	const { answer, mood_delta } = parseAskResponse(step2.choices[0].message.content);
+	const { answer, mood_delta, attitude_delta } = parseAskResponse(step2.choices[0].message.content);
 	if (mood_delta) adjustMood(mood_delta);
+	if (attitude_delta) adjustAttitude(authorTag, attitude_delta);
 	messages.push({ role: 'assistant', content: answer });
 	return answer;
 }
@@ -1172,7 +1209,7 @@ async function handleAskReply(ctx) {
 	const prev = history.messages.filter(m => m.role === 'system' || m.role === 'user' || (m.role === 'assistant' && typeof m.content === 'string'));
 	const messages = [...prev, { role: 'user', content: `[${authorTag}]: ${question}` }];
 
-	const answer = await runAskWithTools(client, messages, heroes, playersMap);
+	const answer = await runAskWithTools(client, messages, heroes, playersMap, authorTag);
 	const sent = await reply(answer);
 	askChatHistory.set(sent.message_id, { messages, ts: Date.now() });
 	pruneAskHistory();
@@ -1233,6 +1270,13 @@ function getDebugInfo() {
 		`Model (ответы): ${GPT_MODEL}`,
 		`Model (логика): ${GPT_MODEL_MINI}`,
 	];
+	if (billyAttitude.size) {
+		lines.push('', '<b>Отношения:</b>');
+		for (const [user, val] of [...billyAttitude.entries()].sort((a, b) => b[1] - a[1])) {
+			const label = val <= 3 ? '💚' : val <= 6 ? '😐' : '🔥';
+			lines.push(`${label} ${user}: ${val}/10`);
+		}
+	}
 	return `<blockquote>${lines.join('\n')}</blockquote>`;
 }
 
