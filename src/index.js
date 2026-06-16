@@ -35,7 +35,7 @@ function createTelegramSender(telegram, chatId) {
 
 function safeCommand(handler) {
 	return async (ctx) => {
-		await deleteMessage(ctx);
+		try { await deleteMessage(ctx); } catch (_) {}
 		try {
 			await handler(ctx);
 		} catch (err) {
