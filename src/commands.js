@@ -1097,7 +1097,7 @@ ${playerList}
 - Если вопрос про всех игроков — вызови функцию для каждого.
 
 ${getMoodPrompt(authorTag)}` },
-		{ role: 'user', content: question }
+		{ role: 'user', content: `[${authorTag}]: ${question}` }
 	];
 
 	const step1 = await client.chat.completions.create({
@@ -1249,7 +1249,11 @@ async function handleAskReply(ctx) {
 	const authorTag = fromUser.username ? `@${fromUser.username}` : fromUser.first_name;
 
 	const prev = history.messages.filter(m => m.role === 'system' || m.role === 'user' || (m.role === 'assistant' && typeof m.content === 'string'));
-	const messages = [...prev, { role: 'user', content: `[${authorTag}]: ${question}` }];
+	const messages = [
+		...prev,
+		{ role: 'system', content: `Сейчас с тобой говорит: ${authorTag}. Отвечай именно ему. Mood/attitude применяй к нему.\n${getMoodPrompt(authorTag)}` },
+		{ role: 'user', content: `[${authorTag}]: ${question}` }
+	];
 
 	const answer = await runAskWithTools(client, messages, heroes, playersMap, authorTag);
 	const sent = await reply(answer);
