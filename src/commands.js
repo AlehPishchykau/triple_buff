@@ -790,37 +790,6 @@ const ASK_TOOLS = [
 			}
 		}
 	},
-	{
-		type: 'function',
-		function: {
-			name: 'save_memory',
-			description: 'Save or update a fact in long-term memory. Use "global" target for group-wide facts, or a @username for personal facts about that user. To update an existing fact, pass replace_index.',
-			parameters: {
-				type: 'object',
-				properties: {
-					target: { type: 'string', description: '"global" or "@username"' },
-					fact: { type: 'string', description: 'Compact fact to remember' },
-					replace_index: { type: 'number', description: 'Index of existing fact to replace (from memory context). Omit to add new.' }
-				},
-				required: ['target', 'fact']
-			}
-		}
-	},
-	{
-		type: 'function',
-		function: {
-			name: 'delete_memory',
-			description: 'Delete a fact from long-term memory by index.',
-			parameters: {
-				type: 'object',
-				properties: {
-					target: { type: 'string', description: '"global" or "@username"' },
-					index: { type: 'number', description: 'Index of fact to delete (from memory context)' }
-				},
-				required: ['target', 'index']
-			}
-		}
-	},
 ];
 
 const ASK_TOOL_HANDLERS = {
@@ -956,18 +925,6 @@ const ASK_TOOL_HANDLERS = {
 			return { error: err.message };
 		}
 	},
-	save_memory: async (args) => {
-		if (args.replace_index !== undefined) {
-			const ok = memory.replaceFact(args.target, args.replace_index, args.fact);
-			return ok ? { status: 'replaced', target: args.target, index: args.replace_index } : { error: 'invalid index' };
-		}
-		memory.addFact(args.target, args.fact);
-		return { status: 'saved', target: args.target };
-	},
-	delete_memory: async (args) => {
-		const removed = memory.deleteFact(args.target, args.index);
-		return removed ? { status: 'deleted', fact: removed } : { error: 'invalid index' };
-	},
 };
 
 const askChatHistory = new Map();
@@ -1010,9 +967,29 @@ function parseAskResponse(raw) {
 			answer: parsed.answer || raw,
 			mood_delta: clampDelta(parsed.mood_delta),
 			attitude_delta: clampDelta(parsed.attitude_delta),
+			memory_ops: Array.isArray(parsed.memory_ops) ? parsed.memory_ops : [],
 		};
 	} catch {
-		return { answer: raw, mood_delta: 0, attitude_delta: 0 };
+		return { answer: raw, mood_delta: 0, attitude_delta: 0, memory_ops: [] };
+	}
+}
+
+function applyMemoryOps(ops) {
+	for (const op of ops) {
+		try {
+			if (op.action === 'save') {
+				memory.addFact(op.target, op.fact);
+				console.log(`Memory save [${op.target}]: ${op.fact}`);
+			} else if (op.action === 'replace') {
+				memory.replaceFact(op.target, op.index, op.fact);
+				console.log(`Memory replace [${op.target}][${op.index}]: ${op.fact}`);
+			} else if (op.action === 'delete') {
+				const removed = memory.deleteFact(op.target, op.index);
+				console.log(`Memory delete [${op.target}][${op.index}]: ${removed}`);
+			}
+		} catch (err) {
+			console.error(`Memory op error:`, err.message);
+		}
 	}
 }
 
@@ -1119,12 +1096,6 @@ ${playerList}
 - Никогда не задавай уточняющих вопросов.
 - Если вопрос про всех игроков — вызови функцию для каждого.
 
-ПАМЯТЬ:
-- У тебя есть долговременная память (save_memory, delete_memory). Используй её, чтобы запоминать важные факты.
-- Если узнал что-то важное о человеке или группе — сохрани. Факты о конкретном человеке — в его память (target = "@username"), общие — в "global".
-- Держи память компактной: если новый факт обновляет старый — замени (replace_index), не плоди дубли. Объединяй мелкие факты в один.
-- Сохраняй только значимое: прозвища, предпочтения, важные события, привычки в игре. Не сохраняй мусор.
-
 ${getMoodPrompt(authorTag)}` },
 		{ role: 'user', content: question }
 	];
@@ -1170,15 +1141,21 @@ ${getMoodPrompt(authorTag)}` },
 
 ${getMoodPrompt(authorTag)}
 
-Верни JSON: {"answer": "твой ответ plain text", "mood_delta": число от -2 до 2, "attitude_delta": число от -2 до 2}
+Верни JSON: {"answer": "...", "mood_delta": -2..2, "attitude_delta": -2..2, "memory_ops": [...]}
 mood_delta — изменение общего настроения. attitude_delta — изменение личного отношения к собеседнику.
-Оскорбления/грубость → +1..+2 (злишься, начинаешь презирать). Вежливость/извинения/комплименты → -1..-2 (добреешь, проникаешься уважением). Нейтрально → 0.` }
+Оскорбления/грубость → +1..+2 (злишься, начинаешь презирать). Вежливость/извинения/комплименты → -1..-2 (добреешь, проникаешься уважением). Нейтрально → 0.
+memory_ops — массив операций с памятью (может быть пустым []):
+  {"action":"save","target":"global"|"@username","fact":"компактный факт"}
+  {"action":"replace","target":"...","index":N,"fact":"обновлённый факт"}
+  {"action":"delete","target":"...","index":N}
+Сохраняй только значимое: прозвища, предпочтения, важные события, привычки. Обновляй существующие факты вместо дублирования. Индексы — из раздела ПАМЯТЬ в контексте.` }
 		],
 	});
 
-	const { answer, mood_delta, attitude_delta } = parseAskResponse(step2.choices[0].message.content);
+	const { answer, mood_delta, attitude_delta, memory_ops } = parseAskResponse(step2.choices[0].message.content);
 	if (mood_delta) adjustMood(mood_delta);
 	if (attitude_delta) adjustAttitude(authorTag, attitude_delta);
+	if (memory_ops.length) applyMemoryOps(memory_ops);
 	messages.push({ role: 'assistant', content: answer });
 	const sent = await reply(answer);
 	askChatHistory.set(sent.message_id, { messages, ts: Date.now() });
@@ -1227,15 +1204,21 @@ async function runAskWithTools(client, messages, heroes, playersMap, authorTag) 
 
 ${getMoodPrompt(authorTag)}
 
-Верни JSON: {"answer": "твой ответ plain text", "mood_delta": число от -2 до 2, "attitude_delta": число от -2 до 2}
+Верни JSON: {"answer": "...", "mood_delta": -2..2, "attitude_delta": -2..2, "memory_ops": [...]}
 mood_delta — изменение общего настроения. attitude_delta — изменение личного отношения к собеседнику.
-Оскорбления/грубость → +1..+2 (злишься, начинаешь презирать). Вежливость/извинения/комплименты → -1..-2 (добреешь, проникаешься уважением). Нейтрально → 0.` }
+Оскорбления/грубость → +1..+2 (злишься, начинаешь презирать). Вежливость/извинения/комплименты → -1..-2 (добреешь, проникаешься уважением). Нейтрально → 0.
+memory_ops — массив операций с памятью (может быть пустым []):
+  {"action":"save","target":"global"|"@username","fact":"компактный факт"}
+  {"action":"replace","target":"...","index":N,"fact":"обновлённый факт"}
+  {"action":"delete","target":"...","index":N}
+Сохраняй только значимое: прозвища, предпочтения, важные события, привычки. Обновляй существующие факты вместо дублирования. Индексы — из раздела ПАМЯТЬ в контексте.` }
 		],
 	});
 
-	const { answer, mood_delta, attitude_delta } = parseAskResponse(step2.choices[0].message.content);
+	const { answer, mood_delta, attitude_delta, memory_ops } = parseAskResponse(step2.choices[0].message.content);
 	if (mood_delta) adjustMood(mood_delta);
 	if (attitude_delta) adjustAttitude(authorTag, attitude_delta);
+	if (memory_ops.length) applyMemoryOps(memory_ops);
 	messages.push({ role: 'assistant', content: answer });
 	return answer;
 }
