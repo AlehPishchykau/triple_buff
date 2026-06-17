@@ -1318,7 +1318,7 @@ function getDebugInfo() {
 		lines.push('', '<b>Отношения:</b>');
 		for (const [user, val] of attitudeEntries.sort((a, b) => b[1] - a[1])) {
 			const label = val <= 3 ? '💚' : val <= 6 ? '😐' : '🔥';
-			lines.push(`${label} ${user}: ${val}/10`);
+			lines.push(`${label} ${user.replace('@', '')}: ${val}/10`);
 		}
 	}
 	return `<blockquote>${lines.join('\n')}</blockquote>`;
