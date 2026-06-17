@@ -13,6 +13,7 @@ const {
 } = require('./requests');
 const { storage } = require('./storage');
 const { secondsToTime, convertMiliseconds, isWin, escapeHTML } = require('./utils');
+const memory = require('./memory');
 const { GPT_MODEL, GPT_MODEL_MINI } = process.env;
 
 const PERIOD_LABELS = {
@@ -789,6 +790,37 @@ const ASK_TOOLS = [
 			}
 		}
 	},
+	{
+		type: 'function',
+		function: {
+			name: 'save_memory',
+			description: 'Save or update a fact in long-term memory. Use "global" target for group-wide facts, or a @username for personal facts about that user. To update an existing fact, pass replace_index.',
+			parameters: {
+				type: 'object',
+				properties: {
+					target: { type: 'string', description: '"global" or "@username"' },
+					fact: { type: 'string', description: 'Compact fact to remember' },
+					replace_index: { type: 'number', description: 'Index of existing fact to replace (from memory context). Omit to add new.' }
+				},
+				required: ['target', 'fact']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'delete_memory',
+			description: 'Delete a fact from long-term memory by index.',
+			parameters: {
+				type: 'object',
+				properties: {
+					target: { type: 'string', description: '"global" or "@username"' },
+					index: { type: 'number', description: 'Index of fact to delete (from memory context)' }
+				},
+				required: ['target', 'index']
+			}
+		}
+	},
 ];
 
 const ASK_TOOL_HANDLERS = {
@@ -924,42 +956,47 @@ const ASK_TOOL_HANDLERS = {
 			return { error: err.message };
 		}
 	},
+	save_memory: async (args) => {
+		if (args.replace_index !== undefined) {
+			const ok = memory.replaceFact(args.target, args.replace_index, args.fact);
+			return ok ? { status: 'replaced', target: args.target, index: args.replace_index } : { error: 'invalid index' };
+		}
+		memory.addFact(args.target, args.fact);
+		return { status: 'saved', target: args.target };
+	},
+	delete_memory: async (args) => {
+		const removed = memory.deleteFact(args.target, args.index);
+		return removed ? { status: 'deleted', fact: removed } : { error: 'invalid index' };
+	},
 };
 
 const askChatHistory = new Map();
 const ASK_HISTORY_TTL = 8 * 60 * 60 * 1000;
 const ASK_HISTORY_MAX = 200;
 
-let billyMood = 5;
-const billyAttitude = new Map();
 const MOOD_BASELINE = 5;
 const DECAY_INTERVAL = 60 * 60 * 1000;
 
 function decayToBaseline() {
-	if (billyMood !== MOOD_BASELINE) {
-		const prev = billyMood;
-		billyMood += billyMood > MOOD_BASELINE ? -1 : 1;
-		console.log(`Mood decay: ${prev} → ${billyMood}`);
+	const mood = memory.getMood();
+	if (mood !== MOOD_BASELINE) {
+		const next = memory.setMood(mood + (mood > MOOD_BASELINE ? -1 : 1));
+		console.log(`Mood decay: ${mood} → ${next}`);
 	}
 }
 
 setInterval(decayToBaseline, DECAY_INTERVAL);
 
-function getAttitude(user) {
-	if (!billyAttitude.has(user)) billyAttitude.set(user, 5);
-	return billyAttitude.get(user);
-}
-
 function adjustMood(delta) {
-	const prev = billyMood;
-	billyMood = Math.max(1, Math.min(10, billyMood + delta));
-	console.log(`Mood: ${prev} → ${billyMood} (delta: ${delta > 0 ? '+' : ''}${delta})`);
+	const prev = memory.getMood();
+	const next = memory.setMood(prev + delta);
+	console.log(`Mood: ${prev} → ${next} (delta: ${delta > 0 ? '+' : ''}${delta})`);
 }
 
 function adjustAttitude(user, delta) {
-	const prev = getAttitude(user);
-	billyAttitude.set(user, Math.max(1, Math.min(10, prev + delta)));
-	console.log(`Attitude [${user}]: ${prev} → ${billyAttitude.get(user)} (delta: ${delta > 0 ? '+' : ''}${delta})`);
+	const prev = memory.getAttitude(user);
+	const next = memory.setAttitude(user, prev + delta);
+	console.log(`Attitude [${user}]: ${prev} → ${next} (delta: ${delta > 0 ? '+' : ''}${delta})`);
 }
 
 function clampDelta(n) {
@@ -980,13 +1017,14 @@ function parseAskResponse(raw) {
 }
 
 function getMoodPrompt(authorTag) {
-	const attitude = getAttitude(authorTag);
-	const effective = Math.round((billyMood + attitude * 2) / 3);
+	const mood = memory.getMood();
+	const attitude = memory.getAttitude(authorTag);
+	const effective = Math.round((mood + attitude * 2) / 3);
 
 	let moodLine;
-	if (billyMood <= 3) moodLine = `Общее настроение: ${billyMood}/10 — ты в хорошем расположении духа.`;
-	else if (billyMood <= 6) moodLine = `Общее настроение: ${billyMood}/10 — стандартный режим.`;
-	else moodLine = `Общее настроение: ${billyMood}/10 — ты на взводе, раздражён.`;
+	if (mood <= 3) moodLine = `Общее настроение: ${mood}/10 — ты в хорошем расположении духа.`;
+	else if (mood <= 6) moodLine = `Общее настроение: ${mood}/10 — стандартный режим.`;
+	else moodLine = `Общее настроение: ${mood}/10 — ты на взводе, раздражён.`;
 
 	let attitudeLine;
 	if (attitude <= 3) attitudeLine = `Отношение к ${authorTag}: ${attitude}/10 — тебе нравится этот человек, он заслужил уважение.`;
@@ -998,7 +1036,10 @@ function getMoodPrompt(authorTag) {
 	else if (effective <= 6) styleLine = 'Итог: стандартный дерзкий и циничный режим.';
 	else styleLine = 'Итог: жёстко подъёбывай, не щади. Можешь быть откровенно токсичным. Мат через слово. Но остроумно.';
 
-	return `${moodLine}\n${attitudeLine}\n${styleLine}`;
+	const memorySummary = memory.getMemorySummary(authorTag);
+	const memoryLine = memorySummary ? `\nПАМЯТЬ:\n${memorySummary}` : '';
+
+	return `${moodLine}\n${attitudeLine}\n${styleLine}${memoryLine}`;
 }
 
 function pruneAskHistory() {
@@ -1077,6 +1118,12 @@ ${playerList}
 - Если автор пишет "мой", "у меня" в контексте доты — определи его по telegram-нику.
 - Никогда не задавай уточняющих вопросов.
 - Если вопрос про всех игроков — вызови функцию для каждого.
+
+ПАМЯТЬ:
+- У тебя есть долговременная память (save_memory, delete_memory). Используй её, чтобы запоминать важные факты.
+- Если узнал что-то важное о человеке или группе — сохрани. Факты о конкретном человеке — в его память (target = "@username"), общие — в "global".
+- Держи память компактной: если новый факт обновляет старый — замени (replace_index), не плоди дубли. Объединяй мелкие факты в один.
+- Сохраняй только значимое: прозвища, предпочтения, важные события, привычки в игре. Не сохраняй мусор.
 
 ${getMoodPrompt(authorTag)}` },
 		{ role: 'user', content: question }
@@ -1273,18 +1320,20 @@ async function generateMatchAnalysis(match, playerId, playersMap, heroes) {
 }
 
 function getDebugInfo() {
-	const moodLabel = billyMood <= 3 ? 'добродушное' : billyMood <= 6 ? 'нейтральное' : 'агрессивное';
+	const debug = memory.getDebugData();
+	const moodLabel = debug.mood <= 3 ? 'добродушное' : debug.mood <= 6 ? 'нейтральное' : 'агрессивное';
 	const lines = [
 		`<b>Billy Debug</b>`,
 		``,
-		`Mood: ${billyMood}/10 (${moodLabel})`,
+		`Mood: ${debug.mood}/10 (${moodLabel})`,
 		`Active reply chains: ${askChatHistory.size}`,
 		`Model (ответы): ${GPT_MODEL}`,
 		`Model (логика): ${GPT_MODEL_MINI}`,
 	];
-	if (billyAttitude.size) {
+	const attitudeEntries = Object.entries(debug.attitudes);
+	if (attitudeEntries.length) {
 		lines.push('', '<b>Отношения:</b>');
-		for (const [user, val] of [...billyAttitude.entries()].sort((a, b) => b[1] - a[1])) {
+		for (const [user, val] of attitudeEntries.sort((a, b) => b[1] - a[1])) {
 			const label = val <= 3 ? '💚' : val <= 6 ? '😐' : '🔥';
 			lines.push(`${label} ${user}: ${val}/10`);
 		}
