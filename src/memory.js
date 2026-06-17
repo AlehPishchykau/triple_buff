@@ -100,9 +100,11 @@ function getMemorySummary(username) {
 		lines.push('Общие факты:');
 		f.global.forEach((fact, i) => lines.push(`  [${i}] ${fact}`));
 	}
-	if (username && f.users[username]?.length) {
-		lines.push(`Факты о ${username}:`);
-		f.users[username].forEach((fact, i) => lines.push(`  [${i}] ${fact}`));
+	for (const [user, facts] of Object.entries(f.users)) {
+		if (!facts.length) continue;
+		const isCurrent = user === username;
+		lines.push(`${user}${isCurrent ? ' (собеседник)' : ''}:`);
+		facts.forEach((fact, i) => lines.push(`  [${i}] ${fact}`));
 	}
 	return lines.join('\n') || null;
 }
