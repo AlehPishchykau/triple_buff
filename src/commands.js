@@ -931,7 +931,7 @@ const askChatHistory = new Map();
 const ASK_HISTORY_TTL = 8 * 60 * 60 * 1000;
 const ASK_HISTORY_MAX = 200;
 
-const MOOD_BASELINE = 50;
+const MOOD_BASELINE = 30;
 const DECAY_INTERVAL = 60 * 60 * 1000;
 
 function decayValue(current) {
