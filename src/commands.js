@@ -931,7 +931,7 @@ const askChatHistory = new Map();
 const ASK_HISTORY_TTL = 8 * 60 * 60 * 1000;
 const ASK_HISTORY_MAX = 200;
 
-const MOOD_BASELINE = 5;
+const MOOD_BASELINE = 50;
 const DECAY_INTERVAL = 60 * 60 * 1000;
 
 function decayToBaseline() {
@@ -957,7 +957,7 @@ function adjustAttitude(user, delta) {
 }
 
 function clampDelta(n) {
-	return Math.max(-2, Math.min(2, Math.round(Number(n) || 0)));
+	return Math.max(-5, Math.min(5, Math.round(Number(n) || 0)));
 }
 
 function parseAskResponse(raw) {
@@ -999,18 +999,18 @@ function getMoodPrompt(authorTag) {
 	const effective = Math.round((mood + attitude * 2) / 3);
 
 	let moodLine;
-	if (mood <= 3) moodLine = `Общее настроение: ${mood}/10 — ты в хорошем расположении духа.`;
-	else if (mood <= 6) moodLine = `Общее настроение: ${mood}/10 — стандартный режим.`;
-	else moodLine = `Общее настроение: ${mood}/10 — ты на взводе, раздражён.`;
+	if (mood <= 30) moodLine = `Общее настроение: ${mood}/100 — ты в хорошем расположении духа.`;
+	else if (mood <= 65) moodLine = `Общее настроение: ${mood}/100 — стандартный режим.`;
+	else moodLine = `Общее настроение: ${mood}/100 — ты на взводе, раздражён.`;
 
 	let attitudeLine;
-	if (attitude <= 3) attitudeLine = `Отношение к ${authorTag}: ${attitude}/10 — тебе нравится этот человек, он заслужил уважение.`;
-	else if (attitude <= 6) attitudeLine = `Отношение к ${authorTag}: ${attitude}/10 — нейтральное, обычный чувак.`;
-	else attitudeLine = `Отношение к ${authorTag}: ${attitude}/10 — этот человек тебя бесит, ты его не уважаешь.`;
+	if (attitude <= 30) attitudeLine = `Отношение к ${authorTag}: ${attitude}/100 — тебе нравится этот человек, он заслужил уважение.`;
+	else if (attitude <= 65) attitudeLine = `Отношение к ${authorTag}: ${attitude}/100 — нейтральное, обычный чувак.`;
+	else attitudeLine = `Отношение к ${authorTag}: ${attitude}/100 — этот человек тебя бесит, ты его не уважаешь.`;
 
 	let styleLine;
-	if (effective <= 3) styleLine = 'Итог: подъёбывай по-дружески, без злобы. Можешь похвалить. Но не превращайся в няшку.';
-	else if (effective <= 6) styleLine = 'Итог: стандартный дерзкий и циничный режим.';
+	if (effective <= 30) styleLine = 'Итог: подъёбывай по-дружески, без злобы. Можешь похвалить. Но не превращайся в няшку.';
+	else if (effective <= 65) styleLine = 'Итог: стандартный дерзкий и циничный режим.';
 	else styleLine = 'Итог: жёстко подъёбывай, не щади. Можешь быть откровенно токсичным. Мат через слово. Но остроумно.';
 
 	const memorySummary = memory.getMemorySummary(authorTag);
@@ -1141,9 +1141,8 @@ ${getMoodPrompt(authorTag)}` },
 
 ${getMoodPrompt(authorTag)}
 
-Верни JSON: {"answer": "...", "mood_delta": -2..2, "attitude_delta": -2..2, "memory_ops": [...]}
-mood_delta — изменение общего настроения. attitude_delta — изменение личного отношения к собеседнику.
-Оскорбления/грубость → +1..+2 (злишься, начинаешь презирать). Вежливость/извинения/комплименты → -1..-2 (добреешь, проникаешься уважением). Нейтрально → 0.
+Верни JSON: {"answer": "...", "mood_delta": -5..5, "attitude_delta": -5..5, "memory_ops": [...]}
+mood_delta/attitude_delta — шкала 1-100. Большинство сообщений → 0. Только явная грубость/оскорбления → +2..+5. Только явная доброта/извинения → -2..-5. Обычный разговор, вопросы, шутки, подколы → 0. Не повышай агрессию на ровном месте.
 memory_ops — массив операций с памятью (может быть пустым []):
   {"action":"save","target":"global"|"@username","fact":"компактный факт"}
   {"action":"replace","target":"...","index":N,"fact":"обновлённый факт"}
@@ -1204,9 +1203,8 @@ async function runAskWithTools(client, messages, heroes, playersMap, authorTag) 
 
 ${getMoodPrompt(authorTag)}
 
-Верни JSON: {"answer": "...", "mood_delta": -2..2, "attitude_delta": -2..2, "memory_ops": [...]}
-mood_delta — изменение общего настроения. attitude_delta — изменение личного отношения к собеседнику.
-Оскорбления/грубость → +1..+2 (злишься, начинаешь презирать). Вежливость/извинения/комплименты → -1..-2 (добреешь, проникаешься уважением). Нейтрально → 0.
+Верни JSON: {"answer": "...", "mood_delta": -5..5, "attitude_delta": -5..5, "memory_ops": [...]}
+mood_delta/attitude_delta — шкала 1-100. Большинство сообщений → 0. Только явная грубость/оскорбления → +2..+5. Только явная доброта/извинения → -2..-5. Обычный разговор, вопросы, шутки, подколы → 0. Не повышай агрессию на ровном месте.
 memory_ops — массив операций с памятью (может быть пустым []):
   {"action":"save","target":"global"|"@username","fact":"компактный факт"}
   {"action":"replace","target":"...","index":N,"fact":"обновлённый факт"}
@@ -1308,11 +1306,11 @@ async function generateMatchAnalysis(match, playerId, playersMap, heroes) {
 
 function getDebugInfo() {
 	const debug = memory.getDebugData();
-	const moodLabel = debug.mood <= 3 ? 'добродушное' : debug.mood <= 6 ? 'нейтральное' : 'агрессивное';
+	const moodLabel = debug.mood <= 30 ? 'добродушное' : debug.mood <= 65 ? 'нейтральное' : 'агрессивное';
 	const lines = [
 		`<b>Billy Debug</b>`,
 		``,
-		`Mood: ${debug.mood}/10 (${moodLabel})`,
+		`Mood: ${debug.mood}/100 (${moodLabel})`,
 		`Active reply chains: ${askChatHistory.size}`,
 		`Model (ответы): ${GPT_MODEL}`,
 		`Model (логика): ${GPT_MODEL_MINI}`,
@@ -1321,8 +1319,8 @@ function getDebugInfo() {
 	if (attitudeEntries.length) {
 		lines.push('', '<b>Отношения:</b>');
 		for (const [user, val] of attitudeEntries.sort((a, b) => b[1] - a[1])) {
-			const label = val <= 3 ? '💚' : val <= 6 ? '😐' : '🔥';
-			lines.push(`${label} ${user.replace('@', '')}: ${val}/10`);
+			const label = val <= 30 ? '💚' : val <= 65 ? '😐' : '🔥';
+			lines.push(`${label} ${user.replace('@', '')}: ${val}/100`);
 		}
 	}
 	return `<blockquote>${lines.join('\n')}</blockquote>`;

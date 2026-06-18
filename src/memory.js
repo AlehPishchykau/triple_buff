@@ -23,7 +23,7 @@ function writeJSON(filePath, data) {
 }
 
 function readState() {
-	return readJSON(STATE_PATH, { mood: 5, attitudes: {} });
+	return readJSON(STATE_PATH, { mood: 50, attitudes: {} });
 }
 
 function writeState(data) {
@@ -44,18 +44,18 @@ function getMood() {
 
 function setMood(val) {
 	const s = readState();
-	s.mood = Math.max(1, Math.min(10, val));
+	s.mood = Math.max(1, Math.min(100, val));
 	writeState(s);
 	return s.mood;
 }
 
 function getAttitude(username) {
-	return readState().attitudes[username] || 5;
+	return readState().attitudes[username] || 50;
 }
 
 function setAttitude(username, val) {
 	const s = readState();
-	s.attitudes[username] = Math.max(1, Math.min(10, val));
+	s.attitudes[username] = Math.max(1, Math.min(100, val));
 	writeState(s);
 	return s.attitudes[username];
 }
