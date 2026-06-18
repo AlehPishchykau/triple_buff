@@ -14,7 +14,7 @@ const {
 const { storage } = require('./storage');
 const { secondsToTime, convertMiliseconds, isWin, escapeHTML } = require('./utils');
 const memory = require('./memory');
-const { GPT_MODEL, GPT_MODEL_MINI } = process.env;
+const { GPT_MODEL, GPT_MODEL_MINI, DATA_URL } = process.env;
 
 const PERIOD_LABELS = {
 	yesterday: 'Вчерашние матчи',
@@ -1046,14 +1046,30 @@ function pruneAskHistory() {
 	}
 }
 
+async function downloadPhoto(ctx) {
+	const photos = ctx.message.photo;
+	if (!photos?.length) return null;
+	const best = photos[photos.length - 1];
+	const fileLink = await ctx.telegram.getFileLink(best.file_id);
+	const res = await fetch(fileLink.href);
+	const buffer = Buffer.from(await res.arrayBuffer());
+	const filename = `${Date.now()}_${best.file_id.slice(-8)}.jpg`;
+	memory.savePhoto(filename, buffer);
+	const publicUrl = `${DATA_URL}/photos/${filename}`;
+	console.log(`Photo saved: ${filename} → ${publicUrl}`);
+	return publicUrl;
+}
+
 async function handleAsk(ctx) {
 	const messageId = ctx.message.message_id;
 	const reply = (text) => ctx.reply(text, { reply_parameters: { message_id: messageId } });
-	const question = ctx.message.text.replace(/^\/(ask|billy)\s*/, '').trim();
-	if (!question) {
+	const rawText = (ctx.message.text || ctx.message.caption || '').replace(/^\/(ask|billy)\s*/, '').trim();
+	const photoUrl = await downloadPhoto(ctx);
+	if (!rawText && !photoUrl) {
 		await reply('Напиши вопрос после команды, например:\n/billy кто больше всех фидит на pudge?');
 		return;
 	}
+	const question = rawText || 'Что на этом фото?';
 
 	const OpenAI = require('openai');
 	const client = new OpenAI();
@@ -1110,7 +1126,12 @@ ${playerList}
 - Если вопрос про всех игроков — вызови функцию для каждого.
 
 ${getMoodPrompt(authorTag)}` },
-		{ role: 'user', content: `[${authorTag}]: ${question}` }
+		{ role: 'user', content: photoUrl
+			? [
+				{ type: 'text', text: `[${authorTag}]: ${question}` },
+				{ type: 'image_url', image_url: { url: photoUrl } }
+			]
+			: `[${authorTag}]: ${question}` }
 	];
 
 	const step1 = await client.chat.completions.create({
@@ -1253,8 +1274,9 @@ async function handleAskReply(ctx) {
 
 	const messageId = ctx.message.message_id;
 	const reply = (text) => ctx.reply(text, { reply_parameters: { message_id: messageId } });
-	const question = ctx.message.text?.trim();
-	if (!question) return false;
+	const question = (ctx.message.text || ctx.message.caption || '').trim();
+	const photoUrl = await downloadPhoto(ctx);
+	if (!question && !photoUrl) return false;
 
 	const OpenAI = require('openai');
 	const client = new OpenAI();
@@ -1275,7 +1297,12 @@ async function handleAskReply(ctx) {
 	const messages = [
 		...prev,
 		{ role: 'system', content: `Сейчас с тобой говорит: ${authorTag}. Отвечай именно ему. Mood/attitude применяй к нему.\n${getMoodPrompt(authorTag)}` },
-		{ role: 'user', content: `[${authorTag}]: ${question}` }
+		{ role: 'user', content: photoUrl
+			? [
+				{ type: 'text', text: `[${authorTag}]: ${question || 'Что на этом фото?'}` },
+				{ type: 'image_url', image_url: { url: photoUrl } }
+			]
+			: `[${authorTag}]: ${question}` }
 	];
 
 	const answer = await runAskWithTools(client, messages, heroes, playersMap, authorTag);

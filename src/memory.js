@@ -109,6 +109,15 @@ function getMemorySummary(username) {
 	return lines.join('\n') || null;
 }
 
+const PHOTOS_DIR = path.join(DATA_DIR, 'photos');
+
+function savePhoto(filename, buffer) {
+	ensureDir(PHOTOS_DIR);
+	const filePath = path.join(PHOTOS_DIR, filename);
+	fs.writeFileSync(filePath, buffer);
+	return filePath;
+}
+
 function getDebugData() {
 	const s = readState();
 	const f = readFacts();
@@ -119,5 +128,5 @@ module.exports = {
 	getMood, setMood,
 	getAttitude, setAttitude,
 	addFact, replaceFact, deleteFact,
-	getMemorySummary, getDebugData,
+	getMemorySummary, getDebugData, savePhoto,
 };

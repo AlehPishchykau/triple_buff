@@ -118,6 +118,23 @@ bot.command('debug', safeCommand(async (ctx) => {
 	await ctx.replyWithHTML(getDebugInfo());
 }));
 
+bot.on('photo', async (ctx, next) => {
+	const caption = ctx.message.caption || '';
+	if (caption.match(/^\/(ask|billy)\b/)) {
+		return askHandler(ctx);
+	}
+	if (ctx.message.reply_to_message) {
+		try {
+			const handled = await handleAskReply(ctx);
+			if (handled) return;
+		} catch (err) {
+			console.error('Ask reply photo error:', err.message);
+			try { await ctx.reply(`Ошибка: ${err.message}`, { reply_parameters: { message_id: ctx.message.message_id } }); } catch (_) {}
+		}
+	}
+	return next();
+});
+
 bot.on('text', async (ctx, next) => {
 	if (ctx.message.text?.startsWith('/')) return next();
 	if (!ctx.message.reply_to_message) return next();
