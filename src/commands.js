@@ -937,7 +937,8 @@ const DECAY_INTERVAL = 60 * 60 * 1000;
 function decayToBaseline() {
 	const mood = memory.getMood();
 	if (mood !== MOOD_BASELINE) {
-		const next = memory.setMood(mood + (mood > MOOD_BASELINE ? -1 : 1));
+		const step = Math.min(5, Math.abs(mood - MOOD_BASELINE));
+		const next = memory.setMood(mood + (mood > MOOD_BASELINE ? -step : step));
 		console.log(`Mood decay: ${mood} → ${next}`);
 	}
 }
