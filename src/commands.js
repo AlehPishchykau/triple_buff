@@ -934,12 +934,24 @@ const ASK_HISTORY_MAX = 200;
 const MOOD_BASELINE = 50;
 const DECAY_INTERVAL = 60 * 60 * 1000;
 
+function decayValue(current) {
+	if (current === MOOD_BASELINE) return current;
+	const step = Math.min(5, Math.abs(current - MOOD_BASELINE));
+	return current + (current > MOOD_BASELINE ? -step : step);
+}
+
 function decayToBaseline() {
 	const mood = memory.getMood();
 	if (mood !== MOOD_BASELINE) {
-		const step = Math.min(5, Math.abs(mood - MOOD_BASELINE));
-		const next = memory.setMood(mood + (mood > MOOD_BASELINE ? -step : step));
+		const next = memory.setMood(decayValue(mood));
 		console.log(`Mood decay: ${mood} → ${next}`);
+	}
+	const debug = memory.getDebugData();
+	for (const [user, val] of Object.entries(debug.attitudes)) {
+		if (val !== MOOD_BASELINE) {
+			const next = memory.setAttitude(user, decayValue(val));
+			console.log(`Attitude decay [${user}]: ${val} → ${next}`);
+		}
 	}
 }
 
