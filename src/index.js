@@ -101,7 +101,10 @@ bot.command('challenge', safeCommand(async (ctx) => {
 
 bot.command('call', safeCommand(async (ctx) => {
 	const { TELEGRAM_USERNAMES } = require('./constants');
-	await ctx.reply(`Какая готовность?\n\n${TELEGRAM_USERNAMES.join(' ')}`);
+	const from = ctx.message.from;
+	const name = from.username ? `@${from.username}` : from.first_name;
+	const others = TELEGRAM_USERNAMES.filter(u => u !== `@${from.username}`);
+	await ctx.reply(`Официальный колл от ${name}. Какая готовность?\n\n${others.join(' ')}`);
 }));
 
 const askHandler = async (ctx) => {
