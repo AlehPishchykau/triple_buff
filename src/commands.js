@@ -311,7 +311,7 @@ function parseMatchesData(matchesByPlayer) {
 
 			if (!result.players[steamAccountId]) {
 				result.players[steamAccountId] = {
-					wins: 0, loses: 0, kdas: [], gpms: [], xpms: [], nws: []
+					wins: 0, loses: 0, kdas: [], gpms: [], xpms: [], nws: [], matches: []
 				};
 			}
 
@@ -327,6 +327,21 @@ function parseMatchesData(matchesByPlayer) {
 			result.players[steamAccountId].gpms.push(m.gold_per_min);
 			result.players[steamAccountId].xpms.push(m.xp_per_min);
 			result.players[steamAccountId].nws.push(networth);
+
+			result.players[steamAccountId].matches.push({
+				heroId: m.hero_id,
+				kills: m.kills,
+				deaths: m.deaths,
+				assists: m.assists,
+				gpm: m.gold_per_min,
+				xpm: m.xp_per_min,
+				heroDamage: m.hero_damage || 0,
+				towerDamage: m.tower_damage || 0,
+				heroHealing: m.hero_healing || 0,
+				lastHits: m.last_hits || 0,
+				duration: m.duration,
+				won,
+			});
 
 			if (m.deaths > result.awards.feeder.value) {
 				result.awards.feeder = { steamAccountId, value: m.deaths, heroId: m.hero_id };
@@ -605,32 +620,37 @@ async function generateChallenge(ctx, playerId) {
 }
 
 async function generateAIReport(data, playersMap, heroes, period) {
-	const playerLines = Object.entries(data.players).map(([id, stats]) => {
+	const playerSections = Object.entries(data.players).map(([id, stats]) => {
 		const name = playersMap[id]?.name || 'Unknown';
 		const total = stats.wins + stats.loses;
 		const wr = ((stats.wins / total) * 100).toFixed(0);
 		const kdaAvg = (stats.kdas.reduce((a, b) => a + b, 0) / stats.kdas.length).toFixed(1);
-		const nwAvg = Math.round(stats.nws.reduce((a, b) => a + b, 0) / stats.nws.length);
-		const gpmAvg = Math.round(stats.gpms.reduce((a, b) => a + b, 0) / stats.gpms.length);
-		return `${name}: ${stats.wins}W-${stats.loses}L (${wr}%), KDA ${kdaAvg}, GPM ${gpmAvg}, NW ${nwAvg}`;
+
+		const matchLines = stats.matches.map(m => {
+			const hero = heroes[m.heroId]?.displayName || '???';
+			const result = m.won ? 'WIN' : 'LOSS';
+			const mins = Math.round(m.duration / 60);
+			const parts = [
+				`${hero} (${result}, ${mins} мин)`,
+				`KDA ${m.kills}/${m.deaths}/${m.assists}`,
+				`GPM ${m.gpm}`,
+				`Hero DMG ${m.heroDamage}`,
+				`Tower DMG ${m.towerDamage}`,
+			];
+			if (m.heroHealing > 500) parts.push(`Healing ${m.heroHealing}`);
+			parts.push(`LH ${m.lastHits}`);
+			return `  - ${parts.join(', ')}`;
+		});
+
+		return [`${name}: ${stats.wins}W-${stats.loses}L (${wr}%), Avg KDA ${kdaAvg}`, ...matchLines].join('\n');
 	});
 
-	if (!playerLines.length) return null;
+	if (!playerSections.length) return null;
 
 	const wins = Object.keys(data.summary.wins).length;
 	const loses = Object.keys(data.summary.loses).length;
-
-	const { awards } = data;
-	const awardLines = [
-		`Фидер: ${playersMap[awards.feeder.steamAccountId]?.name} на ${heroes[awards.feeder.heroId]?.displayName} (${awards.feeder.value} смертей)`,
-		`Фармер: ${playersMap[awards.farmer.steamAccountId]?.name} на ${heroes[awards.farmer.heroId]?.displayName} (${awards.farmer.value} GPM)`,
-		`Разрушитель: ${playersMap[awards.destroyer.steamAccountId]?.name} на ${heroes[awards.destroyer.heroId]?.displayName} (${awards.destroyer.value} tower dmg)`,
-		`Керри: ${playersMap[awards.carry.steamAccountId]?.name} на ${heroes[awards.carry.heroId]?.displayName} (${awards.carry.value} networth)`,
-	];
-
 	const mvp = getMVP(data, playersMap);
 	const periodLabel = PERIOD_LABELS[period] || PERIOD_LABELS.yesterday;
-
 	const playerCount = Object.keys(data.players).length;
 	const matchCount = wins + loses;
 
@@ -641,23 +661,20 @@ async function generateAIReport(data, playersMap, heroes, period) {
 		`Самый длинный матч: ${secondsToTime(data.summary.longestMatchDuration)}`,
 		`Самый короткий матч: ${secondsToTime(data.summary.shortestMatchDuration)}`,
 		'',
-		'Игроки:',
-		...playerLines,
-		'',
-		'Награды:',
-		...awardLines,
+		'Детали по игрокам:',
+		...playerSections,
 		'',
 		`MVP: ${mvp.name} (${mvp.wins}W-${mvp.loses}L, KDA ${mvp.kdaAvg.toFixed(1)}, NW ${mvp.nwAvg.toFixed(0)})`,
 	].join('\n');
 
-	const lengthGuide = matchCount <= 3 ? '50-80 слов' : matchCount <= 8 ? '80-150 слов' : '150-200 слов';
+	const lengthGuide = matchCount <= 3 ? '80-120 слов' : matchCount <= 8 ? '150-250 слов' : '250-350 слов';
 
 	try {
 		const OpenAI = require('openai');
 		const client = new OpenAI();
 		const response = await client.chat.completions.create({
 			model: GPT_MODEL,
-			max_tokens: 600,
+			max_tokens: 1200,
 			messages: [
 				{ role: 'system', content: `Ты — дерзкий комментатор Dota 2 для чата друзей. Пиши на русском. Твоя личность — Билли Херрингтон. Не упоминай гачи напрямую, просто вставляй реплики из гачи-видео как свои фразы (1-3 за текст, к месту).
 
@@ -666,16 +683,27 @@ async function generateAIReport(data, playersMap, heroes, period) {
 - Каждое имя в тексте должно быть из списка игроков. Никаких выдуманных прозвищ.
 - Если факт не следует из данных — не пиши его.
 
+АНАЛИЗ ПО РОЛЯМ:
+- У тебя есть детальные данные по каждому матчу: герой, KDA, дамаг, хил, LH, tower dmg. ИСПОЛЬЗУЙ ИХ.
+- Определяй роль по герою и метрикам: низкий GPM + LH < 100 + healing = суппорт, высокий GPM + LH > 200 = кор.
+- Суппорт с 8 смертями и 20+ ассистами — это НЕ фидер, это рабочая лошадка. Оценивай в контексте роли.
+- Керри с высоким NW/GPM, но низким hero damage — бесполезный АФК-фармер, подъеби за это.
+- Мидер с hero damage ниже суппорта — позор. Подмечай такие контрасты.
+- Если кто-то играл несколько матчей на разных героях — отметь разницу в перфомансе.
+- Дай каждому игроку индивидуальную оценку с привязкой к конкретным героям.
+- ОБЯЗАТЕЛЬНО найди что-то хорошее в игре каждого — даже если он слил. Высокие ассисты, хороший tower damage, healing, участие в килах. Подай это дерзко, без восторгов, но признай заслугу. Даже худшему игроку дня найди за что зацепиться.
+
 СТИЛЬ:
-- Тон — дерзкий и циничный, без позитивщины. Никаких "герой!", "дружище!", "молодцы!", "жги!"
+- Тон — дерзкий и циничный, но справедливый. Никаких "герой!", "дружище!", "молодцы!", "жги!"
 - Мат и дота-сленг приветствуются
-- Издевайся над фидерами, тащеров признавай без восторгов
-- Подмечай контрасты: если у кого-то 100% WR а у другого 0% — это смешно. Если KDA 1.0 — это жёстко.
-- MVP и главный фидер — обязательные персонажи
+- Тащеров признавай без восторгов. Плохую игру называй как есть, но с учётом роли.
+- Даже когда хвалишь — делай это через подъёб или ироничное признание, не через комплименты.
+- Подмечай контрасты: если у кого-то 100% WR а у другого 0% — это смешно. Если KDA 1.0 на керри — это жёстко.
 
 ФОРМАТ:
-- Сплошной текст, без заголовков, без списков. Форматирование: Telegram HTML (<b>, <i>). Не используй markdown (никаких звёздочек и обратных кавычек)
-- Длина: ${lengthGuide}. Мало матчей = короткий текст. Не лей воду.
+- Сначала общая картина дня (2-3 предложения), потом по каждому игроку отдельный абзац с разбором.
+- Форматирование: Telegram HTML (<b>, <i>). Имя игрока выделяй жирным. Не используй markdown.
+- Длина: ${lengthGuide}.
 - Заверши частушкой (4 строки с рифмой) если матчей больше 3. Если матчей мало — без частушки.` },
 				{ role: 'user', content: context }
 			]
