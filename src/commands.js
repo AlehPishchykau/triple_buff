@@ -654,6 +654,8 @@ async function generateAIReport(data, playersMap, heroes, period) {
 	const playerCount = Object.keys(data.players).length;
 	const matchCount = wins + loses;
 
+	const factsText = memory.getMemorySummary();
+
 	const context = [
 		`Период: ${periodLabel}`,
 		`Всего матчей: ${matchCount}, общий счёт: ${wins}W-${loses}L`,
@@ -665,6 +667,7 @@ async function generateAIReport(data, playersMap, heroes, period) {
 		...playerSections,
 		'',
 		`MVP: ${mvp.name} (${mvp.wins}W-${mvp.loses}L, KDA ${mvp.kdaAvg.toFixed(1)}, NW ${mvp.nwAvg.toFixed(0)})`,
+		...(factsText ? ['', 'Факты об игроках (используй к месту, если уместно):', factsText] : []),
 	].join('\n');
 
 	const lengthGuide = matchCount <= 3 ? '80-120 слов' : matchCount <= 8 ? '150-250 слов' : '250-350 слов';
@@ -682,6 +685,9 @@ async function generateAIReport(data, playersMap, heroes, period) {
 - Пиши ТОЛЬКО по данным ниже. Не придумывай имена, события, цифры, которых нет в данных.
 - Каждое имя в тексте должно быть из списка игроков. Никаких выдуманных прозвищ.
 - Если факт не следует из данных — не пиши его.
+
+ФАКТЫ ОБ ИГРОКАХ:
+- В данных могут быть факты о привычках, любимых героях, особенностях игроков. Если факт уместен — вплети его в комментарий для персонализации. Не пересказывай все факты, используй только те, которые связаны со статистикой дня.
 
 АНАЛИЗ ПО РОЛЯМ:
 - У тебя есть детальные данные по каждому матчу: герой, KDA, дамаг, хил, LH, tower dmg. ИСПОЛЬЗУЙ ИХ.
