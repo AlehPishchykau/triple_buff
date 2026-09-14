@@ -72,10 +72,11 @@ bot.use(async (ctx, next) => {
 		}
 
 		if (ctx.message.voice) {
-			const transcript = await transcribeVoice(ctx.telegram, ctx.message.voice.file_id);
-			if (transcript) {
-				saveChatMessage({ from: tag, name, text: transcript, ts, type: 'voice' });
-			}
+			transcribeVoice(ctx.telegram, ctx.message.voice.file_id)
+				.then(transcript => {
+					if (transcript) saveChatMessage({ from: tag, name, text: transcript, ts, type: 'voice' });
+				})
+				.catch(err => console.error('Voice transcribe error:', err.message));
 		}
 	} catch (err) {
 		console.error('Chat log error:', err.message);
