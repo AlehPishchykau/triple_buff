@@ -828,11 +828,12 @@ const ASK_TOOLS = [
 		type: 'function',
 		function: {
 			name: 'get_chat_history',
-			description: 'Get recent chat messages to see what was discussed. Returns text messages and voice message transcriptions with sender names and timestamps. Use when asked about chat discussions, conversations, what people said, or what was talked about ("что обсуждалось", "о чём говорили", "что было в чате").',
+			description: 'Get chat messages for a time period. Returns text messages and voice transcriptions. Use when asked about discussions or conversations. IMPORTANT: history is available only for the last 7 days. If the result has 0 messages, tell the user there are no messages for that period — NEVER invent or guess what was discussed.',
 			parameters: {
 				type: 'object',
 				properties: {
-					hours_ago: { type: 'number', description: 'Get messages from last N hours. Examples: 24 = today/сегодня, 1 = last hour, 48 = 2 days, 168 = week. Default 24.' },
+					hours_ago: { type: 'number', description: 'Get messages from last N hours. Examples: 24 = today, 1 = last hour, 168 = week.' },
+					date: { type: 'string', description: 'Get messages for a specific date in YYYY-MM-DD format. Use instead of hours_ago when asked about a specific day ("3 августа" = "2026-08-03").' },
 				},
 			}
 		}
@@ -973,18 +974,27 @@ const ASK_TOOL_HANDLERS = {
 		}
 	},
 	get_chat_history: async (args) => {
-		const hours = Math.min(args.hours_ago || 24, 168);
+		let from, to;
 		const now = Math.floor(Date.now() / 1000);
-		const from = now - hours * 3600;
-		const messages = memory.getChatMessages(from, now);
 
-		if (!messages.length) return { message_count: 0, note: 'Нет сообщений за этот период' };
+		if (args.date) {
+			const dayStart = new Date(args.date + 'T00:00:00+03:00');
+			from = Math.floor(dayStart.getTime() / 1000);
+			to = from + 86400;
+		} else {
+			const hours = Math.min(args.hours_ago || 24, 168);
+			from = now - hours * 3600;
+			to = now;
+		}
+
+		const messages = memory.getChatMessages(from, to);
+
+		if (!messages.length) return { message_count: 0, note: 'Сообщений за этот период НЕТ. История хранится только 7 дней. НЕ придумывай содержание — скажи пользователю, что данных нет.' };
 
 		const truncated = messages.slice(-300);
 		return {
 			message_count: messages.length,
 			showing: truncated.length,
-			period_hours: hours,
 			messages: truncated.map(m => ({
 				time: new Date(m.ts * 1000).toLocaleString('ru-RU', {
 					hour: '2-digit', minute: '2-digit',
