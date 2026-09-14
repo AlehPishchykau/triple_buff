@@ -109,6 +109,20 @@ function getMemorySummary(username) {
 	return lines.join('\n') || null;
 }
 
+const CHATLOG_PATH = path.join(DATA_DIR, 'chatlog.json');
+const CHATLOG_MAX_AGE = 7 * 86400;
+
+function saveChatMessage({ from, name, text, ts, type }) {
+	const log = readJSON(CHATLOG_PATH, []);
+	log.push({ from, name, text, ts, type });
+	const cutoff = Math.floor(Date.now() / 1000) - CHATLOG_MAX_AGE;
+	writeJSON(CHATLOG_PATH, log.filter(m => m.ts > cutoff));
+}
+
+function getChatMessages(fromTs, toTs) {
+	return readJSON(CHATLOG_PATH, []).filter(m => m.ts >= fromTs && m.ts <= toTs);
+}
+
 const PHOTOS_DIR = path.join(DATA_DIR, 'photos');
 
 function savePhoto(filename, buffer) {
@@ -129,4 +143,5 @@ module.exports = {
 	getAttitude, setAttitude,
 	addFact, replaceFact, deleteFact,
 	getMemorySummary, getDebugData, savePhoto,
+	saveChatMessage, getChatMessages,
 };

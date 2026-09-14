@@ -1,6 +1,10 @@
 require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const cron = require('node-cron');
 const { Markup, Telegraf } = require('telegraf');
+const { saveChatMessage } = require('./memory');
 
 const {
 	sendReport,
@@ -32,6 +36,52 @@ function createTelegramSender(telegram, chatId) {
 		replyWithPhoto: (url) => telegram.sendPhoto(chatId, url),
 	};
 }
+
+async function transcribeVoice(telegram, fileId) {
+	const fileLink = await telegram.getFileLink(fileId);
+	const res = await fetch(fileLink.href);
+	const buffer = Buffer.from(await res.arrayBuffer());
+	const tmpPath = path.join(os.tmpdir(), `voice_${Date.now()}.ogg`);
+	fs.writeFileSync(tmpPath, buffer);
+	try {
+		const OpenAI = require('openai');
+		const client = new OpenAI();
+		const result = await client.audio.transcriptions.create({
+			file: fs.createReadStream(tmpPath),
+			model: 'whisper-1',
+			language: 'ru',
+		});
+		return result.text;
+	} finally {
+		try { fs.unlinkSync(tmpPath); } catch (_) {}
+	}
+}
+
+bot.use(async (ctx, next) => {
+	if (!ctx.message) return next();
+	try {
+		const from = ctx.message.from;
+		if (from?.is_bot) return next();
+		const tag = from.username ? `@${from.username}` : from.first_name;
+		const name = from.first_name || from.username || '???';
+		const ts = ctx.message.date;
+
+		const text = ctx.message.text || ctx.message.caption;
+		if (text) {
+			saveChatMessage({ from: tag, name, text, ts, type: 'text' });
+		}
+
+		if (ctx.message.voice) {
+			const transcript = await transcribeVoice(ctx.telegram, ctx.message.voice.file_id);
+			if (transcript) {
+				saveChatMessage({ from: tag, name, text: transcript, ts, type: 'voice' });
+			}
+		}
+	} catch (err) {
+		console.error('Chat log error:', err.message);
+	}
+	return next();
+});
 
 function safeCommand(handler) {
 	return async (ctx) => {
