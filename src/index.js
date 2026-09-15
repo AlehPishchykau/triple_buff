@@ -227,6 +227,7 @@ bot.on(['voice', 'video_note'], async (ctx, next) => {
 
 		if (/билли|billy/i.test(transcript)) {
 			ctx.message.text = `/billy ${transcript}`;
+			ctx.voiceTranscript = transcript;
 			return askHandler(ctx);
 		}
 	} catch (err) {

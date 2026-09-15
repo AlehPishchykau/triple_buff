@@ -1288,7 +1288,10 @@ memory_ops — массив операций с памятью (может бы�
 	if (attitude_delta) adjustAttitude(authorTag, attitude_delta);
 	if (memory_ops.length) applyMemoryOps(memory_ops);
 	messages.push({ role: 'assistant', content: answer });
-	const sent = await reply(answer);
+	const displayAnswer = ctx.voiceTranscript
+		? `«${ctx.voiceTranscript}»\n\n${answer}`
+		: answer;
+	const sent = await reply(displayAnswer);
 	askChatHistory.set(sent.message_id, { messages, ts: Date.now() });
 	pruneAskHistory();
 }
