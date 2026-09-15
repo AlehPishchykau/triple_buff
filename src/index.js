@@ -37,11 +37,11 @@ function createTelegramSender(telegram, chatId) {
 	};
 }
 
-async function transcribeVoice(telegram, fileId) {
+async function transcribeAudio(telegram, fileId, ext = 'ogg') {
 	const fileLink = await telegram.getFileLink(fileId);
 	const res = await fetch(fileLink.href);
 	const buffer = Buffer.from(await res.arrayBuffer());
-	const tmpPath = path.join(os.tmpdir(), `voice_${Date.now()}.ogg`);
+	const tmpPath = path.join(os.tmpdir(), `audio_${Date.now()}.${ext}`);
 	fs.writeFileSync(tmpPath, buffer);
 	try {
 		const OpenAI = require('openai');
@@ -71,8 +71,14 @@ bot.use(async (ctx, next) => {
 			saveChatMessage({ from: tag, name, text, ts, type: 'text' });
 		}
 
-		if (ctx.message.voice) {
-			transcribeVoice(ctx.telegram, ctx.message.voice.file_id)
+		const voiceFile = ctx.message.voice
+			? { id: ctx.message.voice.file_id, ext: 'ogg' }
+			: ctx.message.video_note
+			? { id: ctx.message.video_note.file_id, ext: 'mp4' }
+			: null;
+
+		if (voiceFile) {
+			transcribeAudio(ctx.telegram, voiceFile.id, voiceFile.ext)
 				.then(transcript => {
 					if (!transcript) return;
 					saveChatMessage({ from: tag, name, text: transcript, ts, type: 'voice' });
