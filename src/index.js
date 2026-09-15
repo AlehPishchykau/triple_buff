@@ -213,12 +213,6 @@ bot.on(['voice', 'video_note'], async (ctx, next) => {
 		const name = from.first_name || from.username || '???';
 		saveChatMessage({ from: tag, name, text: transcript, ts: ctx.message.date, type: 'voice' });
 
-		if (getVoiceTranscribe()) {
-			ctx.reply(`💬 ${name}: «${transcript}»`, {
-				reply_parameters: { message_id: ctx.message.message_id },
-			}).catch(() => {});
-		}
-
 		if (ctx.message.reply_to_message) {
 			ctx.message.text = transcript;
 			const handled = await handleAskReply(ctx);
@@ -229,6 +223,12 @@ bot.on(['voice', 'video_note'], async (ctx, next) => {
 			ctx.message.text = `/billy ${transcript}`;
 			ctx.voiceTranscript = transcript;
 			return askHandler(ctx);
+		}
+
+		if (getVoiceTranscribe()) {
+			ctx.reply(`💬 ${name}: «${transcript}»`, {
+				reply_parameters: { message_id: ctx.message.message_id },
+			}).catch(() => {});
 		}
 	} catch (err) {
 		console.error('Voice handler error:', err.message);
