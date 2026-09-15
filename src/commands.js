@@ -828,12 +828,12 @@ const ASK_TOOLS = [
 		type: 'function',
 		function: {
 			name: 'get_chat_history',
-			description: 'Get chat messages for a time period. Returns text messages and voice transcriptions. Use when asked about discussions or conversations. IMPORTANT: history is available only for the last 7 days. If the result has 0 messages, tell the user there are no messages for that period — NEVER invent or guess what was discussed.',
+			description: 'Get chat messages for a time period. Returns text messages and voice transcriptions. Call this tool EVERY TIME the user asks about chat discussions, conversations, what people said, or follows up on a previous chat summary — even if you already called it before. History is available only for the last 7 days. If 0 messages returned — say there are no messages, NEVER invent content.',
 			parameters: {
 				type: 'object',
 				properties: {
-					hours_ago: { type: 'number', description: 'Get messages from last N hours. Examples: 24 = today, 1 = last hour, 168 = week.' },
-					date: { type: 'string', description: 'Get messages for a specific date in YYYY-MM-DD format. Use instead of hours_ago when asked about a specific day ("3 августа" = "2026-08-03").' },
+					hours_ago: { type: 'number', description: 'Messages from last N hours. Use for relative periods: 1 = last hour, 168 = week. Do NOT use for "сегодня/today" or named days — use date instead.' },
+					date: { type: 'string', description: 'Messages for a specific calendar day (YYYY-MM-DD, timezone Europe/Vilnius). ALWAYS use this for "сегодня/today" (pass today\'s date), "вчера/yesterday", named days ("в понедельник", "3 августа"). Examples: today = current date, yesterday = yesterday\'s date.' },
 				},
 			}
 		}
@@ -1207,6 +1207,12 @@ ${playerList}
 - Никогда не задавай уточняющих вопросов.
 - Если вопрос про всех игроков — вызови функцию для каждого.
 
+ИСТОРИЯ ЧАТА:
+- Если вопрос про переписку, обсуждения, "что говорили", "о чём общались" — ОБЯЗАТЕЛЬНО вызови get_chat_history.
+- Сегодняшняя дата: ${new Date().toISOString().slice(0, 10)}. Для "сегодня" передавай date с этой датой, для "вчера" — вчерашнюю. НЕ используй hours_ago для конкретных дней.
+- Если спрашивают уточнение по переписке ("а что именно он сказал?", "а кто это написал?") — вызови get_chat_history снова, не отвечай по памяти.
+- Отвечай ТОЛЬКО по данным из get_chat_history. Если сообщений нет — скажи что данных нет, не выдумывай.
+
 ${getMoodPrompt(authorTag)}` },
 		{ role: 'user', content: photoUrl
 			? [
@@ -1378,7 +1384,7 @@ async function handleAskReply(ctx) {
 	const prev = history.messages.filter(m => m.role === 'system' || m.role === 'user' || (m.role === 'assistant' && typeof m.content === 'string'));
 	const messages = [
 		...prev,
-		{ role: 'system', content: `Сейчас с тобой говорит: ${authorTag}. Отвечай именно ему. Mood/attitude применяй к нему.\n${getMoodPrompt(authorTag)}` },
+		{ role: 'system', content: `Сейчас с тобой говорит: ${authorTag}. Отвечай именно ему. Mood/attitude применяй к нему. Сегодняшняя дата: ${new Date().toISOString().slice(0, 10)}. Если вопрос про переписку или уточнение по ней — вызови get_chat_history, не отвечай по памяти.\n${getMoodPrompt(authorTag)}` },
 		{ role: 'user', content: photoUrl
 			? [
 				{ type: 'text', text: `[${authorTag}]: ${question || 'Что на этом фото?'}` },
