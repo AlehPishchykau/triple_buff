@@ -225,7 +225,7 @@ bot.on(['voice', 'video_note'], async (ctx, next) => {
 			if (handled) return;
 		}
 
-		if (/\bбилли\b|\bbilly\b/i.test(transcript)) {
+		if (/билли|billy/i.test(transcript)) {
 			ctx.message.text = `/billy ${transcript}`;
 			return askHandler(ctx);
 		}
