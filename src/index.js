@@ -219,6 +219,22 @@ bot.on('text', async (ctx, next) => {
 	}
 });
 
+bot.on(['voice', 'video_note'], async (ctx, next) => {
+	if (!ctx.message.reply_to_message) return next();
+	try {
+		const file = ctx.message.voice || ctx.message.video_note;
+		const ext = ctx.message.voice ? 'ogg' : 'mp4';
+		const transcript = await transcribeAudio(ctx.telegram, file.file_id, ext);
+		if (!transcript) return next();
+		ctx.message.text = transcript;
+		const handled = await handleAskReply(ctx);
+		if (!handled) return next();
+	} catch (err) {
+		console.error('Voice reply error:', err.message);
+		try { await ctx.reply(`Ошибка: ${err.message}`, { reply_parameters: { message_id: ctx.message.message_id } }); } catch (_) {}
+	}
+});
+
 bot.command('adios', async (ctx) => {
 	await deleteMessage(ctx);
 	ctx.replyWithVoice('BQACAgIAAxkBAAIBLWWpm5CuDGxJZe5dkFhVLCK-0k8KAAKyPgACgwVJSVAsluDHpCQlNAQ');
