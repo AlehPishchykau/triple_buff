@@ -70,26 +70,6 @@ bot.use(async (ctx, next) => {
 		if (text) {
 			saveChatMessage({ from: tag, name, text, ts, type: 'text' });
 		}
-
-		const voiceFile = ctx.message.voice
-			? { id: ctx.message.voice.file_id, ext: 'ogg' }
-			: ctx.message.video_note
-			? { id: ctx.message.video_note.file_id, ext: 'mp4' }
-			: null;
-
-		if (voiceFile) {
-			transcribeAudio(ctx.telegram, voiceFile.id, voiceFile.ext)
-				.then(transcript => {
-					if (!transcript) return;
-					saveChatMessage({ from: tag, name, text: transcript, ts, type: 'voice' });
-					if (getVoiceTranscribe()) {
-						ctx.reply(`💬 ${name}: «${transcript}»`, {
-							reply_parameters: { message_id: ctx.message.message_id },
-						}).catch(() => {});
-					}
-				})
-				.catch(err => console.error('Voice transcribe error:', err.message));
-		}
 	} catch (err) {
 		console.error('Chat log error:', err.message);
 	}
@@ -220,19 +200,40 @@ bot.on('text', async (ctx, next) => {
 });
 
 bot.on(['voice', 'video_note'], async (ctx, next) => {
-	if (!ctx.message.reply_to_message) return next();
+	const file = ctx.message.voice || ctx.message.video_note;
+	if (!file) return next();
+
 	try {
-		const file = ctx.message.voice || ctx.message.video_note;
 		const ext = ctx.message.voice ? 'ogg' : 'mp4';
 		const transcript = await transcribeAudio(ctx.telegram, file.file_id, ext);
 		if (!transcript) return next();
-		ctx.message.text = transcript;
-		const handled = await handleAskReply(ctx);
-		if (!handled) return next();
+
+		const from = ctx.message.from;
+		const tag = from.username ? `@${from.username}` : from.first_name;
+		const name = from.first_name || from.username || '???';
+		saveChatMessage({ from: tag, name, text: transcript, ts: ctx.message.date, type: 'voice' });
+
+		if (getVoiceTranscribe()) {
+			ctx.reply(`💬 ${name}: «${transcript}»`, {
+				reply_parameters: { message_id: ctx.message.message_id },
+			}).catch(() => {});
+		}
+
+		if (ctx.message.reply_to_message) {
+			ctx.message.text = transcript;
+			const handled = await handleAskReply(ctx);
+			if (handled) return;
+		}
+
+		if (/\bбилли\b|\bbilly\b/i.test(transcript)) {
+			ctx.message.text = `/billy ${transcript}`;
+			return askHandler(ctx);
+		}
 	} catch (err) {
-		console.error('Voice reply error:', err.message);
+		console.error('Voice handler error:', err.message);
 		try { await ctx.reply(`Ошибка: ${err.message}`, { reply_parameters: { message_id: ctx.message.message_id } }); } catch (_) {}
 	}
+	return next();
 });
 
 bot.command('adios', async (ctx) => {
