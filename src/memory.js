@@ -60,6 +60,17 @@ function setAttitude(username, val) {
 	return s.attitudes[username];
 }
 
+function getVoiceTranscribe() {
+	return readState().voiceTranscribe || false;
+}
+
+function setVoiceTranscribe(enabled) {
+	const s = readState();
+	s.voiceTranscribe = enabled;
+	writeState(s);
+	return enabled;
+}
+
 function addFact(target, fact) {
 	const f = readFacts();
 	if (target === 'global') {
@@ -144,4 +155,5 @@ module.exports = {
 	addFact, replaceFact, deleteFact,
 	getMemorySummary, getDebugData, savePhoto,
 	saveChatMessage, getChatMessages,
+	getVoiceTranscribe, setVoiceTranscribe,
 };

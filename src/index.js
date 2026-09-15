@@ -4,7 +4,7 @@ const path = require('path');
 const os = require('os');
 const cron = require('node-cron');
 const { Markup, Telegraf } = require('telegraf');
-const { saveChatMessage } = require('./memory');
+const { saveChatMessage, getVoiceTranscribe, setVoiceTranscribe } = require('./memory');
 
 const {
 	sendReport,
@@ -74,7 +74,13 @@ bot.use(async (ctx, next) => {
 		if (ctx.message.voice) {
 			transcribeVoice(ctx.telegram, ctx.message.voice.file_id)
 				.then(transcript => {
-					if (transcript) saveChatMessage({ from: tag, name, text: transcript, ts, type: 'voice' });
+					if (!transcript) return;
+					saveChatMessage({ from: tag, name, text: transcript, ts, type: 'voice' });
+					if (getVoiceTranscribe()) {
+						ctx.reply(`💬 ${name}: «${transcript}»`, {
+							reply_parameters: { message_id: ctx.message.message_id },
+						}).catch(() => {});
+					}
 				})
 				.catch(err => console.error('Voice transcribe error:', err.message));
 		}
@@ -135,6 +141,12 @@ bot.command('heroes', safeCommand((ctx) => sendHeroesStats(ctx)));
 bot.command('streak', safeCommand((ctx) => sendStreaks(ctx)));
 bot.command('party', safeCommand((ctx) => sendPartyStats(ctx)));
 bot.command('week', safeCommand((ctx) => sendReport(ctx, 'week')));
+
+bot.command('transcribe', safeCommand(async (ctx) => {
+	const current = getVoiceTranscribe();
+	setVoiceTranscribe(!current);
+	await ctx.replyWithHTML(`<blockquote>Транскрипция голосовых: <b>${!current ? 'включена' : 'выключена'}</b></blockquote>`);
+}));
 
 bot.command('challenge', safeCommand(async (ctx) => {
 	const playersData = await storage.getPlayers();
@@ -282,6 +294,7 @@ bot.telegram.setMyCommands([
 	{ command: 'ask', description: 'Задать вопрос ИИ (/ask вопрос)' },
 	{ command: 'billy', description: 'Спросить Билли (/billy вопрос)' },
 	{ command: 'call', description: 'Позвать всех' },
+	{ command: 'transcribe', description: 'Вкл/выкл транскрипцию голосовых' },
 ]);
 
 if (CHAT_ID) {
