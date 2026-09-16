@@ -12,7 +12,7 @@ const {
 	fetchPlayerTotals,
 } = require('./requests');
 const { storage } = require('./storage');
-const { secondsToTime, convertMiliseconds, isWin, escapeHTML } = require('./utils');
+const { secondsToTime, convertMiliseconds, isWin, escapeHTML, sanitizeTelegramHTML } = require('./utils');
 const memory = require('./memory');
 const { GPT_MODEL, GPT_MODEL_MINI, DATA_URL } = process.env;
 
@@ -614,7 +614,7 @@ async function generateChallenge(ctx, playerId) {
 		]
 	});
 
-	const challenge = response.choices[0].message.content;
+	const challenge = sanitizeTelegramHTML(response.choices[0].message.content);
 	const title = isRandom ? '🎲 Челлендж' : `🎲 Челлендж для ${targetName}`;
 	await ctx.replyWithHTML(`<blockquote><b>${title}</b>\n\n${challenge}</blockquote>`);
 }
@@ -714,7 +714,7 @@ async function generateAIReport(data, playersMap, heroes, period) {
 				{ role: 'user', content: context }
 			]
 		});
-		const text = response.choices[0].message.content;
+		const text = sanitizeTelegramHTML(response.choices[0].message.content);
 		return `<blockquote><b>${periodLabel}</b>\n\n${text}</blockquote>`;
 	} catch (err) {
 		console.error('AI report generation error:', err.message);

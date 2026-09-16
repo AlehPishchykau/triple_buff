@@ -62,6 +62,20 @@ function escapeHTML(text) {
 	return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+const TELEGRAM_ALLOWED_TAGS = new Set([
+	'b', 'strong', 'i', 'em', 'u', 'ins', 's', 'strike', 'del',
+	'code', 'pre', 'a', 'blockquote', 'tg-spoiler', 'tg-emoji',
+]);
+
+function sanitizeTelegramHTML(text) {
+	text = text.replace(/<br\s*\/?>/gi, '\n');
+	text = text.replace(/<hr\s*\/?>/gi, '\n');
+	return text.replace(/<(\/?)([a-zA-Z][a-zA-Z0-9-]*)([^>]*?)>/g, (match, slash, tagName) => {
+		if (TELEGRAM_ALLOWED_TAGS.has(tagName.toLowerCase())) return match;
+		return '';
+	});
+}
+
 module.exports = {
 	openDotaGet,
 	openDotaPost,
@@ -69,5 +83,6 @@ module.exports = {
 	isWin,
 	secondsToTime,
 	convertMiliseconds,
-	escapeHTML
+	escapeHTML,
+	sanitizeTelegramHTML,
 };
