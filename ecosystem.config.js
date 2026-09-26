@@ -7,13 +7,12 @@ module.exports = {
 				BOT_CONFIG: './bots/billy.js',
 			},
 		},
-		// {
-		// 	name: 'another_persona',
-		// 	script: 'src/index.js',
-		// 	env: {
-		// 		BOT_CONFIG: './bots/another_persona.js',
-		// 		TELEGRAM_BOT_TOKEN: '<token>',
-		// 	},
-		// },
+		{
+			name: 'gofman',
+			script: 'src/index.js',
+			env: {
+				BOT_CONFIG: './bots/gofman.js',
+			},
+		},
 	],
 };
