@@ -19,9 +19,9 @@ function save(data) {
 	fs.writeFileSync(filePath(), JSON.stringify(data, null, '\t'));
 }
 
-function register(dotaId, telegramId, telegram) {
+function register(dotaId, telegramId, telegram, name) {
 	const data = load();
-	data[String(dotaId)] = { telegramId, telegram };
+	data[String(dotaId)] = { telegramId, telegram, name };
 	save(data);
 }
 

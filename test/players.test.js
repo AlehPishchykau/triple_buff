@@ -34,17 +34,25 @@ describe('players', () => {
 
 	it('registers a player', () => {
 		withinChat(() => {
-			players.register('12345', 999, '@alice');
+			players.register('12345', 999, '@alice', 'Алиса');
 			const ids = players.getIds();
 			assert.equal(ids.length, 1);
 			assert.equal(ids[0], 12345);
 		});
 	});
 
+	it('stores name', () => {
+		withinChat(() => {
+			players.register('12345', 999, '@alice', 'Алиса');
+			const data = players.load();
+			assert.equal(data['12345'].name, 'Алиса');
+		});
+	});
+
 	it('returns telegram usernames', () => {
 		withinChat(() => {
-			players.register('111', 1, '@alice');
-			players.register('222', 2, '@bob');
+			players.register('111', 1, '@alice', 'Алиса');
+			players.register('222', 2, '@bob', 'Боб');
 			const usernames = players.getTelegramUsernames();
 			assert.deepEqual(usernames.sort(), ['@alice', '@bob']);
 		});
@@ -52,7 +60,7 @@ describe('players', () => {
 
 	it('builds telegram map', () => {
 		withinChat(() => {
-			players.register('111', 1, '@alice');
+			players.register('111', 1, '@alice', 'Алиса');
 			const map = players.getTelegramMap();
 			assert.equal(map[111], '@alice');
 		});
@@ -60,7 +68,7 @@ describe('players', () => {
 
 	it('unregisters a player', () => {
 		withinChat(() => {
-			players.register('111', 42, '@alice');
+			players.register('111', 42, '@alice', 'Алиса');
 			const dotaId = players.unregister(42);
 			assert.equal(dotaId, '111');
 			assert.deepEqual(players.getIds(), []);
@@ -76,9 +84,9 @@ describe('players', () => {
 
 	it('handles multiple players', () => {
 		withinChat(() => {
-			players.register('111', 1, '@alice');
-			players.register('222', 2, '@bob');
-			players.register('333', 3, null);
+			players.register('111', 1, '@alice', 'Алиса');
+			players.register('222', 2, '@bob', 'Боб');
+			players.register('333', 3, null, 'Чарли');
 			assert.equal(players.getIds().length, 3);
 			assert.equal(players.getTelegramUsernames().length, 2);
 		});

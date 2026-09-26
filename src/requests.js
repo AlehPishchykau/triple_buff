@@ -27,6 +27,7 @@ async function fetchMatchesData(period = 'yesterday') {
 
 async function fetchPlayersData() {
 	const ids = players.getIds();
+	const localData = players.load();
 	const results = await Promise.all(
 		ids.map(id => openDotaGet(`/players/${id}`))
 	);
@@ -34,7 +35,8 @@ async function fetchPlayersData() {
 	const data = {};
 	results.forEach(player => {
 		const p = player.profile;
-		data[p.account_id] = { name: p.personaname, avatar: p.avatarfull };
+		const local = localData[String(p.account_id)];
+		data[p.account_id] = { name: local?.name || p.personaname, avatar: p.avatarfull };
 	});
 	return data;
 }

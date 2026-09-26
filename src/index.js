@@ -194,18 +194,20 @@ bot.command('call', safeCommand(async (ctx) => {
 }));
 
 bot.command('register', safeCommand(async (ctx) => {
-	const dotaId = ctx.message.text.split(' ')[1];
-	if (!dotaId || !/^\d+$/.test(dotaId)) {
-		await ctx.replyWithHTML('<blockquote>Формат: /register &lt;dota_id&gt;\nDota ID — число из профиля на opendota.com</blockquote>');
+	const args = ctx.message.text.split(/\s+/).slice(1);
+	const dotaId = args.pop();
+	const name = args.join(' ');
+	if (!dotaId || !/^\d+$/.test(dotaId) || !name) {
+		await ctx.replyWithHTML('<blockquote>Формат: /register &lt;имя&gt; &lt;dota_id&gt;\nПример: /register Олег 123456789</blockquote>');
 		return;
 	}
 	const from = ctx.message.from;
 	const telegram = from.username ? `@${from.username}` : null;
 	try {
-		const playerData = await fetchPlayerData(dotaId);
-		players.register(dotaId, from.id, telegram);
+		await fetchPlayerData(dotaId);
+		players.register(dotaId, from.id, telegram, name);
 		storage.invalidatePlayers();
-		await ctx.replyWithHTML(`<blockquote>${playerData.name} (${dotaId}) зарегистрирован${telegram ? ' как ' + telegram : ''}</blockquote>`);
+		await ctx.replyWithHTML(`<blockquote>${name} (${dotaId}) зарегистрирован${telegram ? ' как ' + telegram : ''}</blockquote>`);
 	} catch {
 		await ctx.replyWithHTML(`<blockquote>Не удалось найти игрока ${dotaId} на OpenDota</blockquote>`);
 	}
