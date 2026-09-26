@@ -1,9 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-
-const DATA_DIR = process.env.DATA_DIR || path.join(process.env.HOME || '/root', 'data', 'triple_buff');
-const STATE_PATH = path.join(DATA_DIR, 'state.json');
-const FACTS_PATH = path.join(DATA_DIR, 'facts.json');
+const chatScope = require('./chatScope');
+const persona = require('./persona');
 
 function ensureDir(dir) {
 	fs.mkdirSync(dir, { recursive: true });
@@ -22,20 +20,36 @@ function writeJSON(filePath, data) {
 	fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
 
+function getPersonaDir() {
+	return chatScope.personaDir(persona.command);
+}
+
+function statePath() {
+	return path.join(getPersonaDir(), 'state.json');
+}
+
+function factsPath() {
+	return path.join(getPersonaDir(), 'facts.json');
+}
+
+function chatlogPath() {
+	return path.join(chatScope.chatDir(), 'chatlog.json');
+}
+
 function readState() {
-	return readJSON(STATE_PATH, { mood: 30, attitudes: {} });
+	return readJSON(statePath(), { mood: 30, attitudes: {} });
 }
 
 function writeState(data) {
-	writeJSON(STATE_PATH, data);
+	writeJSON(statePath(), data);
 }
 
 function readFacts() {
-	return readJSON(FACTS_PATH, { global: [], users: {} });
+	return readJSON(factsPath(), { global: [], users: {} });
 }
 
 function writeFacts(data) {
-	writeJSON(FACTS_PATH, data);
+	writeJSON(factsPath(), data);
 }
 
 function getMood() {
@@ -120,21 +134,20 @@ function getMemorySummary(username) {
 	return lines.join('\n') || null;
 }
 
-const CHATLOG_PATH = path.join(DATA_DIR, 'chatlog.json');
 const CHATLOG_MAX_AGE = 7 * 86400;
 
 function saveChatMessage({ from, name, text, ts, type }) {
-	const log = readJSON(CHATLOG_PATH, []);
+	const log = readJSON(chatlogPath(), []);
 	log.push({ from, name, text, ts, type });
 	const cutoff = Math.floor(Date.now() / 1000) - CHATLOG_MAX_AGE;
-	writeJSON(CHATLOG_PATH, log.filter(m => m.ts > cutoff));
+	writeJSON(chatlogPath(), log.filter(m => m.ts > cutoff));
 }
 
 function getChatMessages(fromTs, toTs) {
-	return readJSON(CHATLOG_PATH, []).filter(m => m.ts >= fromTs && m.ts <= toTs);
+	return readJSON(chatlogPath(), []).filter(m => m.ts >= fromTs && m.ts <= toTs);
 }
 
-const PHOTOS_DIR = path.join(DATA_DIR, 'photos');
+const PHOTOS_DIR = path.join(chatScope.BASE_DIR, 'photos');
 
 function savePhoto(filename, buffer) {
 	ensureDir(PHOTOS_DIR);

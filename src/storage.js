@@ -1,33 +1,38 @@
 const { fetchPlayersData, fetchPlayerData, fetchHeroes, fetchGameModes } = require("./requests");
+const chatScope = require("./chatScope");
 
 class Storage {
-	players = null;
+	_players = new Map();
 	heroes = null;
 	gameModes = null;
 
 	async getPlayers(force = false) {
-		if (!this.players || force) {
-			this.players = await fetchPlayersData();
+		const chatId = chatScope.getChatId();
+		if (!this._players.has(chatId) || force) {
+			this._players.set(chatId, await fetchPlayersData());
 		}
+		return this._players.get(chatId);
+	}
 
-		return this.players;
+	invalidatePlayers() {
+		const chatId = chatScope.getChatId();
+		if (chatId) this._players.delete(chatId);
 	}
 
 	async getPlayer(playerId) {
-		if (!this.players) {
-			this.players = await fetchPlayersData();
+		const chatId = chatScope.getChatId();
+		if (!this._players.has(chatId)) {
+			this._players.set(chatId, await fetchPlayersData());
 		}
-
-		this.players[playerId] = await fetchPlayerData(playerId);
-
-		return this.players[playerId];
+		const players = this._players.get(chatId);
+		players[playerId] = await fetchPlayerData(playerId);
+		return players[playerId];
 	}
 
 	async getHeroes(force = false) {
 		if (!this.heroes || force) {
 			this.heroes = await fetchHeroes();
 		}
-
 		return this.heroes;
 	}
 
@@ -35,13 +40,10 @@ class Storage {
 		if (!this.gameModes || force) {
 			this.gameModes = await fetchGameModes();
 		}
-
 		return this.gameModes;
 	}
 }
 
 const storage = new Storage();
 
-module.exports = {
-	storage
-};
+module.exports = { storage };

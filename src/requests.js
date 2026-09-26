@@ -1,33 +1,34 @@
-const { PLAYERS_IDS } = require('./constants');
+const players = require('./players');
 const { openDotaGet, openDotaPost, isTurbo } = require('./utils');
 
 const TURBO_FILTER = 'game_mode=23&significant=0';
 
 async function refreshPlayers() {
-	await Promise.all(
-		PLAYERS_IDS.map(id => openDotaPost(`/players/${id}/refresh`))
-	);
+	const ids = players.getIds();
+	await Promise.all(ids.map(id => openDotaPost(`/players/${id}/refresh`)));
 }
 
 async function fetchMatchesData(period = 'yesterday') {
+	const ids = players.getIds();
 	const periods = { yesterday: 1, today: 1, week: 7 };
 	const days = periods[period] || 1;
 	const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
 
 	const results = await Promise.all(
-		PLAYERS_IDS.map(id => openDotaGet(`/players/${id}/recentMatches`))
+		ids.map(id => openDotaGet(`/players/${id}/recentMatches`))
 	);
 
 	return results.map((matches, idx) =>
 		matches
 			.filter(m => isTurbo(m) && m.start_time >= cutoff)
-			.map(m => ({ ...m, steamAccountId: PLAYERS_IDS[idx] }))
+			.map(m => ({ ...m, steamAccountId: ids[idx] }))
 	);
 }
 
 async function fetchPlayersData() {
+	const ids = players.getIds();
 	const results = await Promise.all(
-		PLAYERS_IDS.map(id => openDotaGet(`/players/${id}`))
+		ids.map(id => openDotaGet(`/players/${id}`))
 	);
 
 	const data = {};

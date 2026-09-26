@@ -1,4 +1,6 @@
-const { PLAYERS_IDS, PLAYER_TELEGRAM_MAP } = require('./constants');
+const players = require('./players');
+const chatScope = require('./chatScope');
+const persona = require('./persona');
 const {
 	fetchMatchesData,
 	fetchPlayersData,
@@ -591,15 +593,15 @@ async function generateChallenge(ctx, playerId) {
 
 	const targetName = isRandom ? null : playersMap[playerId]?.name;
 
-	const systemPrompt = `Ты генерируешь челленджи для друзей, играющих в Dota 2 Turbo. Русский язык, мат и сленг ок. Твоя личность — Билли Херрингтон. Не упоминай гачи напрямую, просто вставляй реплики из гачи-видео как свои фразы (1 за челлендж, к месту). Челлендж должен быть конкретным.
+	const systemPrompt = `${persona.prompts.identity}
+
+Ты генерируешь челленджи для друзей, играющих в Dota 2 Turbo. Челлендж должен быть конкретным.
 
 ПРАВИЛА:
 - Один конкретный челлендж на 1 игру. Не "постарайтесь", а чёткое условие.
 - Челлендж должен быть проверяем по результату матча: конкретный герой, конкретный итем, конкретная цифра (kills/deaths/GPM/tower dmg).
 - Используй статистику: если у игрока 70% WR на герое — заставь играть на худшем. Если фармер — запрети покупать BKB. Если фидер — челлендж на 0 смертей.
-- Будь дерзким и смешным, подъёбывай по статистике.
-- 2-3 предложения максимум. Без воды, без "удачи!", без объяснений зачем.
-- Не используй markdown и HTML.`;
+${persona.prompts.challengeStyle}`;
 
 	const userPrompt = isRandom
 		? `Статистика игроков (топ герои в турбо):\n${playerContext}\n\nОдин челлендж для всей группы.`
@@ -679,7 +681,9 @@ async function generateAIReport(data, playersMap, heroes, period) {
 			model: GPT_MODEL,
 			max_tokens: 1200,
 			messages: [
-				{ role: 'system', content: `Ты — дерзкий комментатор Dota 2 для чата друзей. Пиши на русском. Твоя личность — Билли Херрингтон. Не упоминай гачи напрямую, просто вставляй реплики из гачи-видео как свои фразы (1-3 за текст, к месту).
+				{ role: 'system', content: `${persona.prompts.identity}
+
+Пиши отчёт по матчам Dota 2 Turbo для чата друзей. Пиши на русском.
 
 ЖЁСТКИЕ ПРАВИЛА:
 - Пиши ТОЛЬКО по данным ниже. Не придумывай имена, события, цифры, которых нет в данных.
@@ -700,17 +704,13 @@ async function generateAIReport(data, playersMap, heroes, period) {
 - ОБЯЗАТЕЛЬНО найди что-то хорошее в игре каждого — даже если он слил. Высокие ассисты, хороший tower damage, healing, участие в килах. Подай это дерзко, без восторгов, но признай заслугу. Даже худшему игроку дня найди за что зацепиться.
 
 СТИЛЬ:
-- Тон — дерзкий и циничный, но справедливый. Никаких "герой!", "дружище!", "молодцы!", "жги!"
-- Мат и дота-сленг приветствуются
-- Тащеров признавай без восторгов. Плохую игру называй как есть, но с учётом роли.
-- Даже когда хвалишь — делай это через подъёб или ироничное признание, не через комплименты.
-- Подмечай контрасты: если у кого-то 100% WR а у другого 0% — это смешно. Если KDA 1.0 на керри — это жёстко.
+${persona.prompts.reportStyle}
 
 ФОРМАТ:
 - Сначала общая картина дня (2-3 предложения), потом по каждому игроку отдельный абзац с разбором.
 - Форматирование: Telegram HTML (<b>, <i>). Имя игрока выделяй жирным. Не используй markdown.
 - Длина: ${lengthGuide}.
-- Заверши частушкой (4 строки с рифмой) если матчей больше 3. Если матчей мало — без частушки.` },
+${persona.prompts.reportBonus}` },
 				{ role: 'user', content: context }
 			]
 		});
@@ -1009,6 +1009,12 @@ const ASK_TOOL_HANDLERS = {
 	},
 };
 
+function getPersonaTools() {
+	if (!persona.tools) return ASK_TOOLS;
+	const enabled = new Set(persona.tools);
+	return ASK_TOOLS.filter(t => enabled.has(t.function.name));
+}
+
 const askChatHistory = new Map();
 const ASK_HISTORY_TTL = 8 * 60 * 60 * 1000;
 const ASK_HISTORY_MAX = 200;
@@ -1037,7 +1043,11 @@ function decayToBaseline() {
 	}
 }
 
-setInterval(decayToBaseline, DECAY_INTERVAL);
+setInterval(() => {
+	for (const chatId of chatScope.listChatIds()) {
+		chatScope.run(chatId, decayToBaseline);
+	}
+}, DECAY_INTERVAL);
 
 function adjustMood(delta) {
 	const prev = memory.getMood();
@@ -1104,9 +1114,9 @@ function getMoodPrompt(authorTag) {
 	else attitudeLine = `Отношение к ${authorTag}: ${attitude}/100 — этот человек тебя бесит, ты его не уважаешь.`;
 
 	let styleLine;
-	if (effective <= 30) styleLine = 'Итог: подъёбывай по-дружески, без злобы. Можешь похвалить. Но не превращайся в няшку.';
-	else if (effective <= 65) styleLine = 'Итог: стандартный дерзкий и циничный режим.';
-	else styleLine = 'Итог: жёстко подъёбывай, не щади. Можешь быть откровенно токсичным. Мат через слово. Но остроумно.';
+	if (effective <= 30) styleLine = `Итог: ${persona.prompts.moodLow}`;
+	else if (effective <= 65) styleLine = `Итог: ${persona.prompts.moodMid}`;
+	else styleLine = `Итог: ${persona.prompts.moodHigh}`;
 
 	const memorySummary = memory.getMemorySummary(authorTag);
 	const memoryLine = memorySummary ? `\nПАМЯТЬ:\n${memorySummary}` : '';
@@ -1145,10 +1155,10 @@ async function downloadPhoto(ctx) {
 async function handleAsk(ctx) {
 	const messageId = ctx.message.message_id;
 	const reply = (text) => ctx.reply(text, { reply_parameters: { message_id: messageId } });
-	const rawText = (ctx.message.text || ctx.message.caption || '').replace(/^\/(ask|billy)\s*/, '').trim();
+	const rawText = (ctx.message.text || ctx.message.caption || '').replace(new RegExp('^/(ask|' + persona.command + ')\\s*'), '').trim();
 	const photoUrl = await downloadPhoto(ctx);
 	if (!rawText && !photoUrl) {
-		await reply('Напиши вопрос после команды, например:\n/billy кто больше всех фидит на pudge?');
+		await reply(`Напиши вопрос после команды, например:\n/${persona.command} кто больше всех фидит на pudge?`);
 		return;
 	}
 	const question = rawText || 'Что на этом фото?';
@@ -1167,7 +1177,8 @@ async function handleAsk(ctx) {
 
 	const playerList = Object.entries(playersMap)
 		.map(([id, data]) => {
-			const tg = PLAYER_TELEGRAM_MAP[Number(id)] || '';
+			const telegramMap = players.getTelegramMap();
+		const tg = telegramMap[Number(id)] || '';
 			return `${data.name} (id: ${id}, telegram: ${tg})`;
 		})
 		.join('\n');
@@ -1186,18 +1197,10 @@ ${playerList}
 Вопрос задаёт: ${authorTag}
 
 ЛИЧНОСТЬ:
-Ты — Билли Херрингтон. Если спросят кто ты или про твою биографию — отвечай честно и с юмором, ничего не скрывай, ты не стесняешься своего прошлого. Но сам не навязывай гачи-тему и не упоминай гачи напрямую. Просто БУДЬ им: естественно вставляй реплики из гачи-видео в речь как свои фразы — 1-2 за ответ, к месту, как часть речи, не как цитаты.
+${persona.prompts.identity}
 
 СТИЛЬ:
-- Пиши как дерзкий циничный друг в чате, который подъёбывает. НЕ мотивационный коуч, НЕ позитивный помощник
-- Никаких "герой!", "дружище!", "вперёд!", "давай!", "жги!" — это фальшь. Общайся ровно, как нормальный чувак
-- Мат — часть стиля, используй свободно, но грамотно
-- Если кто-то играет хуёво — скажи прямо. Если хорошо — признай, но без восторгов
-- Если вопрос НЕ про доту — отвечай по теме вопроса, не притягивай доту
-- Правильная дота-терминология: официальные названия на английском (как в игре)
-- НЕ транслитерируй английские слова кириллицей. Используй русский эквивалент или английское слово как есть
-- Не выдумывай слова, не коверкай названия, не пиши псевдосленг
-- Будь конкретным и лаконичным
+${persona.prompts.style}
 
 ДАННЫЕ:
 - Если вопрос связан с игроками, матчами, статистикой — ОБЯЗАТЕЛЬНО вызови функции. Не отвечай из головы про игроков.
@@ -1226,7 +1229,7 @@ ${getMoodPrompt(authorTag)}` },
 		model: GPT_MODEL_MINI,
 		max_tokens: 300,
 		messages,
-		tools: ASK_TOOLS,
+		tools: getPersonaTools(),
 	});
 
 	const choice = step1.choices[0];
@@ -1259,7 +1262,7 @@ ${getMoodPrompt(authorTag)}` },
 		response_format: { type: 'json_object' },
 		messages: [
 			...messages,
-			{ role: 'system', content: `Ответь на вопрос по полученным данным. Помни: ты Билли Херрингтон, не упоминай гачи, просто вставь 1-2 реплики из гачи-видео как свои фразы. Грамотный русский, мат к месту. Правильная дота-терминология. НЕ транслитерируй английские слова кириллицей. Кратко и по делу.
+			{ role: 'system', content: `Ответь на вопрос по полученным данным. Помни: ${persona.prompts.styleShort}
 
 ${getMoodPrompt(authorTag)}
 
@@ -1301,7 +1304,7 @@ async function runAskWithTools(client, messages, heroes, playersMap, authorTag) 
 		model: GPT_MODEL_MINI,
 		max_tokens: 300,
 		messages,
-		tools: ASK_TOOLS,
+		tools: getPersonaTools(),
 	});
 
 	const choice = step1.choices[0];
@@ -1334,7 +1337,7 @@ async function runAskWithTools(client, messages, heroes, playersMap, authorTag) 
 		response_format: { type: 'json_object' },
 		messages: [
 			...messages,
-			{ role: 'system', content: `Ответь на вопрос по полученным данным. Помни: ты Билли Херрингтон, не упоминай гачи, просто вставь 1-2 реплики из гачи-видео как свои фразы. Грамотный русский, мат к месту. Правильная дота-терминология. НЕ транслитерируй английские слова кириллицей. Кратко и по делу.
+			{ role: 'system', content: `Ответь на вопрос по полученным данным. Помни: ${persona.prompts.styleShort}
 
 ${getMoodPrompt(authorTag)}
 
@@ -1442,7 +1445,9 @@ async function generateMatchAnalysis(match, playerId, playersMap, heroes) {
 			model: GPT_MODEL,
 			max_tokens: 600,
 			messages: [
-				{ role: 'system', content: `Ты — аналитик Dota 2. Напиши краткий разбор матча на русском с матами и сленгом. Твоя личность — Билли Херрингтон. Не упоминай гачи напрямую, просто вставляй реплики из гачи-видео как свои фразы (1-2 за текст, к месту). Тон — дерзкий и циничный, без позитивщины, никаких "герой!", "молодцы!", "жги!".
+				{ role: 'system', content: `${persona.prompts.identity}
+
+Ты — аналитик Dota 2. Напиши краткий разбор матча на русском. ${persona.prompts.analysisStyle}
 
 Пиши единым связным текстом, как спортивный комментатор. Без заголовков, без списков, без разделов. Главный герой повествования — выделенный игрок: его роль, вклад, ошибки, ключевые цифры. Остальных наших ([НАШ]) упомяни вскользь для контекста. 4-6 предложений. Plain text без форматирования.` },
 				{ role: 'user', content: context }
@@ -1459,7 +1464,7 @@ function getDebugInfo() {
 	const debug = memory.getDebugData();
 	const moodLabel = debug.mood <= 30 ? 'добродушное' : debug.mood <= 65 ? 'нейтральное' : 'агрессивное';
 	const lines = [
-		`<b>Billy Debug</b>`,
+		`<b>${persona.name} Debug</b>`,
 		``,
 		`Mood: ${debug.mood}/100 (${moodLabel})`,
 		`Active reply chains: ${askChatHistory.size}`,

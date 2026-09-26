@@ -5,6 +5,8 @@ const os = require('os');
 const cron = require('node-cron');
 const { Markup, Telegraf } = require('telegraf');
 const { saveChatMessage, getVoiceTranscribe, setVoiceTranscribe } = require('./memory');
+const persona = require('./persona');
+const chatScope = require('./chatScope');
 
 const {
 	sendReport,
@@ -24,9 +26,10 @@ const {
 	deleteMessage,
 	deleteAction,
 } = require('./commands');
-const { refreshPlayers } = require('./requests');
+const { refreshPlayers, fetchPlayerData } = require('./requests');
 const { storage } = require('./storage');
-const { TELEGRAM_BOT_TOKEN, CHAT_ID } = process.env;
+const players = require('./players');
+const { TELEGRAM_BOT_TOKEN } = process.env;
 
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 
@@ -57,6 +60,12 @@ async function transcribeAudio(telegram, fileId, ext = 'ogg') {
 	}
 }
 
+bot.use((ctx, next) => {
+	const chatId = ctx.chat?.id;
+	if (chatId) return chatScope.run(chatId, next);
+	return next();
+});
+
 bot.use(async (ctx, next) => {
 	if (!ctx.message) return next();
 	try {
@@ -86,6 +95,17 @@ function safeCommand(handler) {
 			try { await ctx.replyWithHTML(`<blockquote>Ошибка: ${err.message}</blockquote>`); } catch (_) {}
 		}
 	};
+}
+
+if (persona.commands) {
+	const allowedCommands = new Set([...persona.commands, 'ask', persona.command, 'debug', 'register', 'unregister']);
+	bot.use((ctx, next) => {
+		if (ctx.message?.text?.startsWith('/')) {
+			const cmd = ctx.message.text.split(/[\s@]/)[0].slice(1);
+			if (!allowedCommands.has(cmd)) return;
+		}
+		return next();
+	});
 }
 
 bot.command('report', safeCommand(async (ctx) => {
@@ -149,11 +169,43 @@ bot.command('challenge', safeCommand(async (ctx) => {
 }));
 
 bot.command('call', safeCommand(async (ctx) => {
-	const { TELEGRAM_USERNAMES } = require('./constants');
 	const from = ctx.message.from;
 	const name = from.username ? `@${from.username}` : from.first_name;
-	const others = TELEGRAM_USERNAMES.filter(u => u !== `@${from.username}`);
+	const usernames = players.getTelegramUsernames();
+	const others = usernames.filter(u => u !== `@${from.username}`);
+	if (!others.length) {
+		await ctx.replyWithHTML('<blockquote>Нет зарегистрированных игроков</blockquote>');
+		return;
+	}
 	await ctx.reply(`Официальный колл от ${name}. Какая готовность?\n\n${others.join(' ')}`);
+}));
+
+bot.command('register', safeCommand(async (ctx) => {
+	const dotaId = ctx.message.text.split(' ')[1];
+	if (!dotaId || !/^\d+$/.test(dotaId)) {
+		await ctx.replyWithHTML('<blockquote>Формат: /register &lt;dota_id&gt;\nDota ID — число из профиля на opendota.com</blockquote>');
+		return;
+	}
+	const from = ctx.message.from;
+	const telegram = from.username ? `@${from.username}` : null;
+	try {
+		const playerData = await fetchPlayerData(dotaId);
+		players.register(dotaId, from.id, telegram);
+		storage.invalidatePlayers();
+		await ctx.replyWithHTML(`<blockquote>${playerData.name} (${dotaId}) зарегистрирован${telegram ? ' как ' + telegram : ''}</blockquote>`);
+	} catch {
+		await ctx.replyWithHTML(`<blockquote>Не удалось найти игрока ${dotaId} на OpenDota</blockquote>`);
+	}
+}));
+
+bot.command('unregister', safeCommand(async (ctx) => {
+	const dotaId = players.unregister(ctx.message.from.id);
+	if (dotaId) {
+		storage.invalidatePlayers();
+		await ctx.replyWithHTML(`<blockquote>Игрок ${dotaId} удалён</blockquote>`);
+	} else {
+		await ctx.replyWithHTML('<blockquote>Ты не зарегистрирован</blockquote>');
+	}
 }));
 
 const askHandler = async (ctx) => {
@@ -165,14 +217,14 @@ const askHandler = async (ctx) => {
 	}
 };
 bot.command('ask', askHandler);
-bot.command('billy', askHandler);
+bot.command(persona.command, askHandler);
 bot.command('debug', safeCommand(async (ctx) => {
 	await ctx.replyWithHTML(getDebugInfo());
 }));
 
 bot.on('photo', async (ctx, next) => {
 	const caption = ctx.message.caption || '';
-	if (caption.match(/^\/(ask|billy)\b/)) {
+	if (caption.match(new RegExp('^/(ask|' + persona.command + ')\\b'))) {
 		return askHandler(ctx);
 	}
 	if (ctx.message.reply_to_message) {
@@ -189,14 +241,21 @@ bot.on('photo', async (ctx, next) => {
 
 bot.on('text', async (ctx, next) => {
 	if (ctx.message.text?.startsWith('/')) return next();
-	if (!ctx.message.reply_to_message) return next();
-	try {
-		const handled = await handleAskReply(ctx);
-		if (!handled) return next();
-	} catch (err) {
-		console.error('Ask reply error:', err.message);
-		try { await ctx.reply(`Ошибка: ${err.message}`, { reply_parameters: { message_id: ctx.message.message_id } }); } catch (_) {}
+	if (ctx.message.reply_to_message) {
+		try {
+			const handled = await handleAskReply(ctx);
+			if (handled) return;
+		} catch (err) {
+			console.error('Ask reply error:', err.message);
+			try { await ctx.reply(`Ошибка: ${err.message}`, { reply_parameters: { message_id: ctx.message.message_id } }); } catch (_) {}
+			return;
+		}
 	}
+	if (persona.triggerRegex.test(ctx.message.text)) {
+		ctx.message.text = `/${persona.command} ${ctx.message.text}`;
+		return askHandler(ctx);
+	}
+	return next();
 });
 
 bot.on(['voice', 'video_note'], async (ctx, next) => {
@@ -219,8 +278,8 @@ bot.on(['voice', 'video_note'], async (ctx, next) => {
 			if (handled) return;
 		}
 
-		if (/билли|billy/i.test(transcript)) {
-			ctx.message.text = `/billy ${transcript}`;
+		if (persona.triggerRegex.test(transcript)) {
+			ctx.message.text = `/${persona.command} ${transcript}`;
 			ctx.voiceTranscript = transcript;
 			return askHandler(ctx);
 		}
@@ -305,29 +364,50 @@ bot.action(/ch:(.+)/, async (ctx) => {
 	}
 });
 
-bot.telegram.setMyCommands([
-	{ command: 'report', description: 'Отчёт по матчам (/report или /report week)' },
-	{ command: 'winrate', description: 'Винрейт в турбо' },
-	{ command: 'last', description: 'Последний матч' },
-	{ command: 'heroes', description: 'Топ-3 героев' },
-	{ command: 'streak', description: 'Серии побед/поражений' },
-	{ command: 'party', description: 'Совместные игры' },
-	{ command: 'week', description: 'Недельный отчёт' },
-	{ command: 'time', description: 'Время без Dota 2' },
-	{ command: 'challenge', description: 'Рандомный челлендж' },
-	{ command: 'ask', description: 'Задать вопрос ИИ (/ask вопрос)' },
-	{ command: 'billy', description: 'Спросить Билли (/billy вопрос)' },
-	{ command: 'call', description: 'Позвать всех' },
-	{ command: 'transcribe', description: 'Вкл/выкл транскрипцию голосовых' },
-]);
+const COMMAND_DESCRIPTIONS = {
+	report: 'Отчёт по матчам (/report или /report week)',
+	winrate: 'Винрейт в турбо',
+	last: 'Последний матч',
+	heroes: 'Топ-3 героев',
+	streak: 'Серии побед/поражений',
+	party: 'Совместные игры',
+	week: 'Недельный отчёт',
+	time: 'Время без Dota 2',
+	challenge: 'Рандомный челлендж',
+	call: 'Позвать всех',
+	transcribe: 'Вкл/выкл транскрипцию голосовых',
+};
 
-if (CHAT_ID) {
-	cron.schedule('0 8 * * *', () => {
-		const sender = createTelegramSender(bot.telegram, CHAT_ID);
-		sendReport(sender, 'yesterday');
+const botCommands = [
+	{ command: 'ask', description: 'Задать вопрос ИИ (/ask вопрос)' },
+	{ command: persona.command, description: `Спросить ${persona.name} (/${persona.command} вопрос)` },
+	{ command: 'register', description: 'Привязать Dota аккаунт (/register <dota_id>)' },
+	{ command: 'unregister', description: 'Отвязать Dota аккаунт' },
+];
+const enabledCmds = persona.commands || Object.keys(COMMAND_DESCRIPTIONS);
+for (const name of enabledCmds) {
+	if (COMMAND_DESCRIPTIONS[name]) {
+		botCommands.push({ command: name, description: COMMAND_DESCRIPTIONS[name] });
+	}
+}
+bot.telegram.setMyCommands(botCommands);
+
+if (!persona.commands || persona.commands.includes('report')) {
+	cron.schedule(persona.cron?.schedule || '0 8 * * *', async () => {
+		for (const chatId of chatScope.listChatIds()) {
+			try {
+				await chatScope.run(chatId, async () => {
+					if (players.getIds().length === 0) return;
+					const sender = createTelegramSender(bot.telegram, chatId);
+					await sendReport(sender, 'yesterday');
+				});
+			} catch (err) {
+				console.error(`Cron report error [${chatId}]:`, err.message);
+			}
+		}
 	}, {
 		scheduled: true,
-		timezone: 'Europe/Vilnius'
+		timezone: persona.cron?.timezone || 'Europe/Vilnius'
 	});
 }
 
@@ -338,7 +418,11 @@ bot.catch(async (err, ctx) => {
 	} catch (_) {}
 });
 
-refreshPlayers().catch(err => console.error('Player refresh failed:', err.message));
+Promise.all(
+	chatScope.listChatIds().map(id =>
+		chatScope.run(id, () => refreshPlayers())
+	)
+).catch(err => console.error('Player refresh failed:', err.message));
 
 bot.launch();
 
