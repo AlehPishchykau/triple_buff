@@ -7,12 +7,13 @@ const { Markup, Telegraf } = require('telegraf');
 const { saveChatMessage, getChatMessages, getVoiceTranscribe, setVoiceTranscribe } = require('./memory');
 const persona = require('./persona');
 const chatScope = require('./chatScope');
+const crossBot = require('./crossBot');
+const { startDecayTimer } = require('./mood');
 
 const {
 	sendReport,
 	sendPlayerWinrate,
 	sendPlayersWinrate,
-	sendLastMatchStats,
 	sendLastMatchesList,
 	sendMatchDetails,
 	sendLastPlayTime,
@@ -22,8 +23,6 @@ const {
 	generateChallenge,
 	handleAsk,
 	handleAskReply,
-	handleCrossBotReply,
-	handleRandomInterjection,
 	getDebugInfo,
 	deleteMessage,
 	deleteAction,
@@ -34,23 +33,6 @@ const players = require('./players');
 const { TELEGRAM_BOT_TOKEN } = process.env;
 
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
-
-const crossBotState = {};
-
-function resetCrossBotChain(chatId) {
-	if (crossBotState[chatId]) crossBotState[chatId].chainCount = 0;
-}
-
-function canReplyToBot(chatId) {
-	const config = persona.crossBot;
-	if (!config) return false;
-	if (!crossBotState[chatId]) crossBotState[chatId] = { chainCount: 0, lastReplyTs: 0 };
-	const state = crossBotState[chatId];
-	if (state.chainCount >= (config.maxChain || 2)) return false;
-	if (Date.now() - state.lastReplyTs < (config.cooldownMs || 120000)) return false;
-	if (Math.random() > (config.replyChance || 0.3)) return false;
-	return true;
-}
 
 function createTelegramSender(telegram, chatId) {
 	return {
@@ -79,6 +61,11 @@ async function transcribeAudio(telegram, fileId, ext = 'ogg') {
 	}
 }
 
+function saveBotReply(text) {
+	const ts = Math.floor(Date.now() / 1000);
+	saveChatMessage({ from: persona.command, name: persona.name, text, ts, type: 'bot' });
+}
+
 bot.use((ctx, next) => {
 	const chatId = ctx.chat?.id;
 	if (chatId) return chatScope.run(chatId, next);
@@ -100,7 +87,7 @@ bot.use(async (ctx, next) => {
 		}
 
 		const chatId = ctx.chat?.id;
-		if (chatId) resetCrossBotChain(chatId);
+		if (chatId) crossBot.resetChain(chatId);
 
 		if (text) {
 			saveChatMessage({ from: tag, name, text, ts, type: 'text' });
@@ -270,15 +257,15 @@ bot.on('text', async (ctx, next) => {
 
 	if (ctx.message.from?.is_bot) {
 		const chatId = ctx.chat.id;
-		if (!crossBotState[chatId]) crossBotState[chatId] = { chainCount: 0, lastReplyTs: 0 };
-		crossBotState[chatId].chainCount++;
+		crossBot.trackBotMessage(chatId);
 
-		if (canReplyToBot(chatId)) {
+		if (crossBot.canReplyToBot(chatId)) {
 			try {
 				const botName = ctx.message.from.first_name || ctx.message.from.username;
-				const answer = await handleCrossBotReply(ctx.message.text, botName);
+				const answer = await crossBot.handleCrossBotReply(ctx.message.text, botName);
 				if (answer) {
-					crossBotState[chatId].lastReplyTs = Date.now();
+					crossBot.markBotReply(chatId);
+					saveBotReply(answer);
 					await ctx.reply(answer, { reply_parameters: { message_id: ctx.message.message_id } });
 				}
 			} catch (err) {
@@ -303,27 +290,21 @@ bot.on('text', async (ctx, next) => {
 		return askHandler(ctx);
 	}
 
-	const crossCfg = persona.crossBot;
-	if (crossCfg?.randomChance && Math.random() < crossCfg.randomChance) {
-		const chatId = ctx.chat.id;
-		if (!crossBotState[chatId]) crossBotState[chatId] = { chainCount: 0, lastReplyTs: 0, lastRandomTs: 0 };
-		const state = crossBotState[chatId];
-		const randomCooldown = crossCfg.randomCooldownMs || 600000;
-		if (Date.now() - (state.lastRandomTs || 0) > randomCooldown) {
-			try {
-				const now = Math.floor(Date.now() / 1000);
-				const recent = getChatMessages(now - 300, now);
-				if (recent.length >= 2) {
-					const last = recent.slice(-10);
-					const answer = await handleRandomInterjection(last);
-					if (answer) {
-						state.lastRandomTs = Date.now();
-						await ctx.reply(answer, { reply_parameters: { message_id: ctx.message.message_id } });
-					}
+	if (crossBot.canRandomInterject(ctx.chat.id)) {
+		try {
+			const now = Math.floor(Date.now() / 1000);
+			const recent = getChatMessages(now - 300, now);
+			if (recent.length >= 2) {
+				const last = recent.slice(-10);
+				const answer = await crossBot.handleRandomInterjection(last);
+				if (answer) {
+					crossBot.markRandomInterjection(ctx.chat.id);
+					saveBotReply(answer);
+					await ctx.reply(answer, { reply_parameters: { message_id: ctx.message.message_id } });
 				}
-			} catch (err) {
-				console.error('Random interjection error:', err.message);
 			}
+		} catch (err) {
+			console.error('Random interjection error:', err.message);
 		}
 	}
 
@@ -482,6 +463,8 @@ if (!persona.commands || persona.commands.includes('report')) {
 		timezone: persona.cron?.timezone || 'Europe/Vilnius'
 	});
 }
+
+startDecayTimer();
 
 bot.catch(async (err, ctx) => {
 	console.error(`Error for ${ctx.updateType}:`, err.message);

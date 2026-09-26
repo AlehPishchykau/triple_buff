@@ -1,5 +1,4 @@
 const players = require('./players');
-const chatScope = require('./chatScope');
 const persona = require('./persona');
 const {
 	fetchMatchesData,
@@ -11,18 +10,15 @@ const {
 	fetchMatchDetail,
 	fetchLastMatchData,
 	fetchPeers,
-	fetchPlayerTotals,
 } = require('./requests');
 const { storage } = require('./storage');
 const { secondsToTime, convertMiliseconds, isWin, escapeHTML, sanitizeTelegramHTML } = require('./utils');
 const memory = require('./memory');
+const { saveChatMessage } = memory;
+const { parseMatchesData, getSummary, getMVP, getAwards, PERIOD_LABELS } = require('./matchParser');
+const { adjustMood, adjustAttitude, getMoodPrompt, parseAskResponse, applyMemoryOps } = require('./mood');
+const { ASK_TOOL_HANDLERS, getPersonaTools } = require('./askTools');
 const { GPT_MODEL, GPT_MODEL_MINI, DATA_URL } = process.env;
-
-const PERIOD_LABELS = {
-	yesterday: 'Вчерашние матчи',
-	today: 'Матчи за сутки',
-	week: 'Матчи за неделю',
-};
 
 async function sendReport(ctx, period = 'yesterday') {
 	const matchesData = await fetchMatchesData(period);
@@ -77,20 +73,20 @@ async function sendPlayersWinrate(ctx, period = 'allTime') {
 	const requests = Object.keys(playersMap).map(id => fetchPlayerMatchesStats(id));
 	const response = await Promise.all(requests);
 	const periodString = period === 'allTime' ? 'All time' : 'Last month';
-	const players = Object.values(playersMap);
+	const playersList = Object.values(playersMap);
 
 	const playersStats = response.map((stats, index) => {
 		const turboStats = stats[period];
 
 		if (!turboStats || turboStats.matchCount === 0) {
 			return `
-			<b>${players[index].name}</b>
+			<b>${playersList[index].name}</b>
 			No turbo matches
 		`;
 		}
 
 		return `
-			<b>${players[index].name}</b>
+			<b>${playersList[index].name}</b>
 			Matches: ${turboStats.matchCount}
 			Winrate: ${(turboStats.winCount / turboStats.matchCount * 100).toFixed(1)}%
 		`;
@@ -107,18 +103,18 @@ async function sendPlayersWinrate(ctx, period = 'allTime') {
 }
 
 async function sendPlayerWinrate(ctx, playerId, period = 'allTime') {
-	const players = await storage.getPlayers();
+	const playersMap = await storage.getPlayers();
 	const stats = await fetchPlayerMatchesStats(playerId);
 	const turboStats = stats[period];
 
-	if (!players[playerId]) {
+	if (!playersMap[playerId]) {
 		return;
 	}
 
 	if (!turboStats || turboStats.matchCount === 0) {
 		const message = `
 		<blockquote>
-		<b>${players[playerId].name}</b>
+		<b>${playersMap[playerId].name}</b>
 		No turbo matches found
 		</blockquote>
 	`;
@@ -130,7 +126,7 @@ async function sendPlayerWinrate(ctx, playerId, period = 'allTime') {
 
 	const message = `
 		<blockquote>
-		<b>${players[playerId].name}</b>
+		<b>${playersMap[playerId].name}</b>
 
 		${periodString} turbo matches: ${turboStats.matchCount}
 		Winrate: ${(turboStats.winCount / turboStats.matchCount * 100).toFixed(1)}%
@@ -141,11 +137,11 @@ async function sendPlayerWinrate(ctx, playerId, period = 'allTime') {
 }
 
 async function sendLastMatchStats(ctx, playerId) {
-	const players = await storage.getPlayers();
+	const playersMap = await storage.getPlayers();
 	const heroes = await storage.getHeroes();
 	const matches = await fetchLastMatches(playerId, 1);
 
-	if (!matches.length || !players[playerId]) {
+	if (!matches.length || !playersMap[playerId]) {
 		return;
 	}
 
@@ -155,7 +151,7 @@ async function sendLastMatchStats(ctx, playerId) {
 
 	const message = `
 		<blockquote>
-		<b>${players[playerId].name}</b> <a href="https://www.opendota.com/matches/${match.match_id}">${won ? 'won' : 'lost'} last match on ${hero?.displayName || '???'}</a>
+		<b>${playersMap[playerId].name}</b> <a href="https://www.opendota.com/matches/${match.match_id}">${won ? 'won' : 'lost'} last match on ${hero?.displayName || '???'}</a>
 		${(new Date(match.start_time * 1000)).toLocaleString('ru-RU', { timeZone: 'UTC' })} (UTC)
 
 		Duration: ${secondsToTime(match.duration)}
@@ -202,11 +198,11 @@ async function sendLastMatchesList(ctx) {
 }
 
 async function sendMatchDetails(ctx, matchId, playerId) {
-	const players = await storage.getPlayers();
+	const playersMap = await storage.getPlayers();
 	const heroes = await storage.getHeroes();
 	const match = await fetchMatchDetail(matchId);
 
-	if (!match || !players[playerId]) return;
+	if (!match || !playersMap[playerId]) return;
 
 	const p = match.players.find(pl => pl.account_id === Number(playerId));
 	if (!p) return;
@@ -216,7 +212,7 @@ async function sendMatchDetails(ctx, matchId, playerId) {
 
 	const message = `
 		<blockquote>
-		<b>${players[playerId].name}</b> <a href="https://www.opendota.com/matches/${match.match_id}">${won ? 'won' : 'lost'} on ${hero?.displayName || '???'}</a>
+		<b>${playersMap[playerId].name}</b> <a href="https://www.opendota.com/matches/${match.match_id}">${won ? 'won' : 'lost'} on ${hero?.displayName || '???'}</a>
 		${(new Date(match.start_time * 1000)).toLocaleString('ru-RU', { timeZone: 'UTC' })} (UTC)
 
 		Duration: ${secondsToTime(match.duration)}
@@ -231,7 +227,7 @@ async function sendMatchDetails(ctx, matchId, playerId) {
 
 	await ctx.replyWithHTML(message);
 
-	const analysis = await generateMatchAnalysis(match, playerId, players, heroes);
+	const analysis = await generateMatchAnalysis(match, playerId, playersMap, heroes);
 	if (analysis) {
 		await ctx.replyWithHTML(`<blockquote>${escapeHTML(analysis)}</blockquote>`);
 	}
@@ -241,15 +237,15 @@ async function sendLastPlayTime(ctx) {
 	const playersMap = await storage.getPlayers();
 	const requests = Object.keys(playersMap).map(id => fetchLastMatchData(id));
 	const response = await Promise.all(requests);
-	const players = Object.values(playersMap);
+	const playersList = Object.values(playersMap);
 
 	const timeStats = response.map((match, index) => {
 		if (!match) {
-			return `${players[index].name}: no matches found`;
+			return `${playersList[index].name}: no matches found`;
 		}
 		const endTime = (match.start_time + match.duration) * 1000;
 		const time = Date.now() - endTime;
-		return `${players[index].name}: ${convertMiliseconds(time)}`;
+		return `${playersList[index].name}: ${convertMiliseconds(time)}`;
 	});
 
 	const message = `
@@ -260,15 +256,6 @@ async function sendLastPlayTime(ctx) {
 	`;
 
 	await ctx.replyWithHTML(message);
-}
-
-async function sendSafeHTML(ctx, html) {
-	try {
-		await ctx.replyWithHTML(html);
-	} catch (_) {
-		const plain = html.replace(/<[^>]+>/g, '');
-		await ctx.reply(plain);
-	}
 }
 
 async function deleteMessage(ctx) {
@@ -285,198 +272,6 @@ async function deleteAction(ctx) {
 	} catch(error) {
 		console.log(error);
 	}
-}
-
-////// PARSER //////
-function parseMatchesData(matchesByPlayer) {
-	const result = {
-		players: {},
-		summary: {
-			longestMatchDuration: null,
-			shortestMatchDuration: Infinity,
-			wins: {},
-			loses: {},
-		},
-		awards: {
-			feeder: { steamAccountId: null, value: 0, heroId: null },
-			farmer: { steamAccountId: null, value: 0, heroId: null },
-			destroyer: { steamAccountId: null, value: 0, heroId: null },
-			carry: { steamAccountId: null, value: 0, heroId: null },
-		}
-	};
-
-	matchesByPlayer.forEach((playerMatches) => {
-		playerMatches.forEach((m) => {
-			const steamAccountId = m.steamAccountId;
-			const won = isWin(m);
-			const networth = Math.round(m.gold_per_min * m.duration / 60);
-
-			if (!result.players[steamAccountId]) {
-				result.players[steamAccountId] = {
-					wins: 0, loses: 0, kdas: [], gpms: [], xpms: [], nws: [], matches: []
-				};
-			}
-
-			if (won) {
-				result.players[steamAccountId].wins++;
-				result.summary.wins[m.match_id] = true;
-			} else {
-				result.players[steamAccountId].loses++;
-				result.summary.loses[m.match_id] = true;
-			}
-
-			result.players[steamAccountId].kdas.push((m.kills + m.assists) / (m.deaths || 1));
-			result.players[steamAccountId].gpms.push(m.gold_per_min);
-			result.players[steamAccountId].xpms.push(m.xp_per_min);
-			result.players[steamAccountId].nws.push(networth);
-
-			result.players[steamAccountId].matches.push({
-				heroId: m.hero_id,
-				kills: m.kills,
-				deaths: m.deaths,
-				assists: m.assists,
-				gpm: m.gold_per_min,
-				xpm: m.xp_per_min,
-				heroDamage: m.hero_damage || 0,
-				towerDamage: m.tower_damage || 0,
-				heroHealing: m.hero_healing || 0,
-				lastHits: m.last_hits || 0,
-				duration: m.duration,
-				won,
-			});
-
-			if (m.deaths > result.awards.feeder.value) {
-				result.awards.feeder = { steamAccountId, value: m.deaths, heroId: m.hero_id };
-			}
-			if (m.gold_per_min > result.awards.farmer.value) {
-				result.awards.farmer = { steamAccountId, value: m.gold_per_min, heroId: m.hero_id };
-			}
-			if (m.tower_damage > result.awards.destroyer.value) {
-				result.awards.destroyer = { steamAccountId, value: m.tower_damage, heroId: m.hero_id };
-			}
-			if (networth > result.awards.carry.value) {
-				result.awards.carry = { steamAccountId, value: networth, heroId: m.hero_id };
-			}
-
-			if (m.duration > result.summary.longestMatchDuration) {
-				result.summary.longestMatchDuration = m.duration;
-			}
-
-			if (m.duration < result.summary.shortestMatchDuration) {
-				result.summary.shortestMatchDuration = m.duration;
-			}
-		});
-	});
-
-	return result;
-}
-
-function getSummary(data, playersMap, period = 'yesterday') {
-	const wins = Object.keys(data.summary.wins).length;
-	const loses = Object.keys(data.summary.loses).length;
-	const players = Object.keys(data.players).map((playerId) => playersMap[playerId].name);
-	const stats = {};
-
-	if (!players.length) {
-		return 'Всем похуй на игру...';
-	}
-
-	Object.entries(data.players).forEach(([key, value]) => {
-		const maxKDA = Math.max(...value.kdas);
-		const maxNW = Math.max(...value.nws);
-		const maxGPM = Math.max(...value.gpms);
-
-		if (maxKDA > (stats.topKDA?.value || 0)) {
-			stats.topKDA = {
-				name: playersMap[key].name,
-				value: maxKDA
-			}
-		}
-
-		if (maxNW > (stats.topNW?.value || 0)) {
-			stats.topNW = {
-				name: playersMap[key].name,
-				value: maxNW
-			}
-		}
-
-		if (maxGPM > (stats.topGPM?.value || 0)) {
-			stats.topGPM = {
-				name: playersMap[key].name,
-				value: maxGPM
-			}
-		}
-	});
-
-	let message = `<blockquote><b>${PERIOD_LABELS[period] || PERIOD_LABELS.yesterday}</b>\n\n`;
-
-	if (players.length === 1) {
-		message += `The only strong man - ${players[0]}. Respect!`;
-	} else {
-		message += `Strong men - ${players.join(', ')}.`;
-	}
-
-	message += `\nWL: ${wins} - ${loses}`;
-	message += `\nLongest match - ${secondsToTime(data.summary.longestMatchDuration)}`;
-	message += `\nShortest match - ${secondsToTime(data.summary.shortestMatchDuration)}`;
-	message += '\n';
-	message += `\nBest KDA: ${stats.topKDA.value.toFixed(1)} (${stats.topKDA.name})`;
-	message += `\nBest Networth: ${stats.topNW.value} (${stats.topNW.name})`;
-	message += '</blockquote>';
-
-	return message;
-}
-
-function getMVP(data, playersMap) {
-	let mvp = {};
-
-	Object.entries(data.players).forEach(([key, value]) => {
-		const {
-			wins, loses, kdas, nws
-		} = value;
-		const totalGames = wins + loses;
-		const winrate = totalGames > 0 ? wins / totalGames : 0;
-		const kdaAvg = kdas.reduce((a, b) => a + b, 0) / kdas.length;
-		const nwAvg = nws.reduce((a, b) => a + b, 0) / nws.length;
-		const score = winrate * 50 + kdaAvg * 10 + nwAvg / 500 + totalGames * 2;
-
-		if (score > (mvp.score || 0)) {
-			const { avatar, name} = playersMap[key];
-
-			mvp = {
-				avatar,
-				name,
-				score,
-				wins,
-				loses,
-				kdaAvg,
-				nwAvg
-			}
-		}
-	});
-
-	return mvp;
-}
-
-function getAwards(data, playersMap, heroes) {
-	const { awards } = data;
-	if (!awards.feeder.steamAccountId) return null;
-
-	const AWARD_CONFIG = [
-		{ key: 'feeder', label: 'Фидер', unit: 'смертей' },
-		{ key: 'farmer', label: 'Фармер', unit: 'GPM' },
-		{ key: 'destroyer', label: 'Разрушитель', unit: 'tower dmg' },
-		{ key: 'carry', label: 'Керри', unit: 'networth' },
-	];
-
-	const lines = AWARD_CONFIG.map(({ key, label, unit }) => {
-		const award = awards[key];
-		const name = playersMap[award.steamAccountId]?.name || 'Unknown';
-		const hero = heroes[award.heroId]?.displayName || '';
-		return `<b>${label}</b>: ${name} (${hero}, ${award.value} ${unit})`;
-	});
-
-	return `<blockquote><b>Награды</b>\n${lines.join('\n')}</blockquote>`;
 }
 
 async function sendHeroesStats(ctx) {
@@ -722,407 +517,9 @@ ${persona.prompts.reportBonus}` },
 	}
 }
 
-const ASK_TOOLS = [
-	{
-		type: 'function',
-		function: {
-			name: 'get_player_winrate',
-			description: 'Win/loss stats for a player in turbo. Returns allTime and oneMonth.',
-			parameters: {
-				type: 'object',
-				properties: { player_id: { type: 'string' } },
-				required: ['player_id']
-			}
-		}
-	},
-	{
-		type: 'function',
-		function: {
-			name: 'get_player_heroes',
-			description: 'Top heroes for a player in turbo (sorted by games played). Returns heroId, matchCount, winCount.',
-			parameters: {
-				type: 'object',
-				properties: { player_id: { type: 'string' } },
-				required: ['player_id']
-			}
-		}
-	},
-	{
-		type: 'function',
-		function: {
-			name: 'get_recent_matches',
-			description: 'Recent turbo matches for a player. Use days param to filter by time (e.g. days=1 for yesterday). Returns hero, kills, deaths, assists, gpm, xpm, duration, win/loss, date.',
-			parameters: {
-				type: 'object',
-				properties: {
-					player_id: { type: 'string' },
-					count: { type: 'number', description: 'How many matches (max 20)' },
-					days: { type: 'number', description: 'Only return matches from last N days (e.g. 1 = last 24h)' }
-				},
-				required: ['player_id']
-			}
-		}
-	},
-	{
-		type: 'function',
-		function: {
-			name: 'get_player_peers',
-			description: 'Who this player plays with most in turbo (last 30 days). Returns peer account_id, games, wins.',
-			parameters: {
-				type: 'object',
-				properties: { player_id: { type: 'string' } },
-				required: ['player_id']
-			}
-		}
-	},
-	{
-		type: 'function',
-		function: {
-			name: 'get_match_details',
-			description: 'Full details of a specific match. Returns all players with hero, kills, deaths, assists, networth, damage, etc.',
-			parameters: {
-				type: 'object',
-				properties: { match_id: { type: 'string' } },
-				required: ['match_id']
-			}
-		}
-	},
-	{
-		type: 'function',
-		function: {
-			name: 'get_player_totals',
-			description: 'Aggregated totals for a player in turbo: kills, deaths, assists, gold_per_min, xp_per_min, hero_damage, tower_damage, last_hits, duration, etc. Each field has sum and n (count).',
-			parameters: {
-				type: 'object',
-				properties: { player_id: { type: 'string' } },
-				required: ['player_id']
-			}
-		}
-	},
-	{
-		type: 'function',
-		function: {
-			name: 'get_last_group_match',
-			description: 'Find the most recent turbo match played by any tracked player. Returns full match details with all 10 players, marking tracked ones. Use for "last game", "latest match", "последняя катка". Matches with same match_id from different players are the same game.',
-			parameters: {
-				type: 'object',
-				properties: {},
-			}
-		}
-	},
-	{
-		type: 'function',
-		function: {
-			name: 'web_search',
-			description: 'Search the internet for current info (meta, patches, builds, pro scene, anything not in your training data). Use when you need up-to-date information.',
-			parameters: {
-				type: 'object',
-				properties: {
-					query: { type: 'string', description: 'Search query in English for best results' }
-				},
-				required: ['query']
-			}
-		}
-	},
-	{
-		type: 'function',
-		function: {
-			name: 'get_chat_history',
-			description: 'Get chat messages for a time period. Returns text messages and voice transcriptions. Call this tool EVERY TIME the user asks about chat discussions, conversations, what people said, or follows up on a previous chat summary — even if you already called it before. History is available only for the last 7 days. If 0 messages returned — say there are no messages, NEVER invent content.',
-			parameters: {
-				type: 'object',
-				properties: {
-					hours_ago: { type: 'number', description: 'Messages from last N hours. Use for relative periods: 1 = last hour, 168 = week. Do NOT use for "сегодня/today" or named days — use date instead.' },
-					date: { type: 'string', description: 'Messages for a specific calendar day (YYYY-MM-DD, timezone Europe/Vilnius). ALWAYS use this for "сегодня/today" (pass today\'s date), "вчера/yesterday", named days ("в понедельник", "3 августа"). Examples: today = current date, yesterday = yesterday\'s date.' },
-				},
-			}
-		}
-	},
-];
-
-const ASK_TOOL_HANDLERS = {
-	get_player_winrate: async (args, _heroes, playersMap) => {
-		const name = playersMap[args.player_id]?.name || args.player_id;
-		const stats = await fetchPlayerMatchesStats(args.player_id);
-		return { player: name, ...stats };
-	},
-	get_player_heroes: async (args, heroes, playersMap) => {
-		const name = playersMap[args.player_id]?.name || args.player_id;
-		const stats = await fetchPlayerHeroesStats(args.player_id);
-		return {
-			player: name,
-			heroes: stats.slice(0, 20).map(h => ({
-				hero: heroes[h.heroId]?.displayName || h.heroId,
-				games: h.matchCount,
-				wins: h.winCount,
-				winrate: ((h.winCount / h.matchCount) * 100).toFixed(1) + '%'
-			}))
-		};
-	},
-	get_recent_matches: async (args, heroes, playersMap) => {
-		const name = playersMap[args.player_id]?.name || args.player_id;
-		const count = Math.min(args.count || 10, 20);
-		let matches = await fetchRecentMatches(args.player_id, count);
-		if (args.days) {
-			const cutoff = Math.floor(Date.now() / 1000) - args.days * 86400;
-			matches = matches.filter(m => m.start_time >= cutoff);
-		}
-		return {
-			player: name,
-			match_count: matches.length,
-			matches: matches.map(m => ({
-				match_id: m.match_id,
-				hero: heroes[m.hero_id]?.displayName || m.hero_id,
-				win: isWin(m),
-				kills: m.kills, deaths: m.deaths, assists: m.assists,
-				gpm: m.gold_per_min, xpm: m.xp_per_min,
-				duration_min: Math.round(m.duration / 60),
-				date: new Date(m.start_time * 1000).toLocaleDateString('ru-RU'),
-			}))
-		};
-	},
-	get_player_peers: async (args, _heroes, playersMap) => {
-		const name = playersMap[args.player_id]?.name || args.player_id;
-		const peers = await fetchPeers(args.player_id, 30);
-		const trackedIds = new Set(Object.keys(playersMap).map(Number));
-		return {
-			player: name,
-			peers: peers
-				.filter(p => trackedIds.has(p.account_id))
-				.map(p => ({
-					name: playersMap[String(p.account_id)]?.name || p.account_id,
-					games: p.games, wins: p.win,
-					winrate: ((p.win / p.games) * 100).toFixed(1) + '%'
-				}))
-		};
-	},
-	get_match_details: async (args, heroes) => {
-		const match = await fetchMatchDetail(args.match_id);
-		if (!match) return { error: 'Match not found' };
-		return {
-			match_id: match.match_id,
-			duration_min: Math.round(match.duration / 60),
-			radiant_win: match.radiant_win,
-			players: match.players.map(p => ({
-				name: p.personaname, hero: heroes[p.hero_id]?.displayName || p.hero_id,
-				kills: p.kills, deaths: p.deaths, assists: p.assists,
-				networth: p.net_worth || p.total_gold,
-				hero_damage: p.hero_damage, tower_damage: p.tower_damage,
-				gpm: p.gold_per_min, team: p.player_slot < 128 ? 'radiant' : 'dire',
-			}))
-		};
-	},
-	get_player_totals: async (args, _heroes, playersMap) => {
-		const name = playersMap[args.player_id]?.name || args.player_id;
-		const totals = await fetchPlayerTotals(args.player_id);
-		const useful = ['kills', 'deaths', 'assists', 'gold_per_min', 'xp_per_min',
-			'hero_damage', 'tower_damage', 'last_hits', 'duration', 'level'];
-		const filtered = {};
-		totals.forEach(t => {
-			if (useful.includes(t.field)) {
-				filtered[t.field] = { total: t.sum, games: t.n, avg: t.n > 0 ? Math.round(t.sum / t.n) : 0 };
-			}
-		});
-		return { player: name, totals: filtered };
-	},
-	get_last_group_match: async (_args, heroes, playersMap) => {
-		const playerIds = Object.keys(playersMap);
-		const allMatches = await Promise.all(playerIds.map(id => fetchRecentMatches(id, 10)));
-		const matchPlayers = {};
-		allMatches.forEach((matches, idx) => {
-			matches.forEach(m => {
-				if (!matchPlayers[m.match_id]) matchPlayers[m.match_id] = { time: m.start_time, players: [] };
-				matchPlayers[m.match_id].players.push(playerIds[idx]);
-			});
-		});
-		const groupMatches = Object.entries(matchPlayers)
-			.sort((a, b) => b[1].time - a[1].time);
-		if (!groupMatches.length) return { error: 'No recent matches found' };
-		const matchId = groupMatches[0][0];
-		const match = await fetchMatchDetail(matchId);
-		if (!match) return { error: 'Match details unavailable' };
-		const trackedIds = new Set(playerIds.map(Number));
-		return {
-			match_id: match.match_id,
-			duration_min: Math.round(match.duration / 60),
-			radiant_win: match.radiant_win,
-			date: new Date(match.start_time * 1000).toLocaleDateString('ru-RU'),
-			players: match.players.map(p => ({
-				name: playersMap[String(p.account_id)]?.name || p.personaname || '???',
-				is_tracked: trackedIds.has(p.account_id),
-				hero: heroes[p.hero_id]?.displayName || '???',
-				team: p.player_slot < 128 ? 'radiant' : 'dire',
-				win: p.radiant_win === (p.player_slot < 128),
-				kills: p.kills, deaths: p.deaths, assists: p.assists,
-				gpm: p.gold_per_min, networth: p.net_worth || p.total_gold,
-				hero_damage: p.hero_damage, tower_damage: p.tower_damage,
-			}))
-		};
-	},
-	web_search: async (args) => {
-		try {
-			const OpenAI = require('openai');
-			const client = new OpenAI();
-			const response = await client.responses.create({
-				model: GPT_MODEL_MINI,
-				tools: [{ type: 'web_search_preview' }],
-				input: args.query,
-			});
-			return { results: response.output_text };
-		} catch (err) {
-			return { error: err.message };
-		}
-	},
-	get_chat_history: async (args) => {
-		let from, to;
-		const now = Math.floor(Date.now() / 1000);
-
-		if (args.date) {
-			const dayStart = new Date(args.date + 'T00:00:00+03:00');
-			from = Math.floor(dayStart.getTime() / 1000);
-			to = from + 86400;
-		} else {
-			const hours = Math.min(args.hours_ago || 24, 168);
-			from = now - hours * 3600;
-			to = now;
-		}
-
-		const messages = memory.getChatMessages(from, to);
-
-		if (!messages.length) return { message_count: 0, note: 'Сообщений за этот период НЕТ. История хранится только 7 дней. НЕ придумывай содержание — скажи пользователю, что данных нет.' };
-
-		const truncated = messages.slice(-300);
-		return {
-			message_count: messages.length,
-			showing: truncated.length,
-			messages: truncated.map(m => ({
-				time: new Date(m.ts * 1000).toLocaleString('ru-RU', {
-					hour: '2-digit', minute: '2-digit',
-					day: '2-digit', month: '2-digit',
-					timeZone: 'Europe/Vilnius',
-				}),
-				from: m.name,
-				text: m.text.length > 500 ? m.text.slice(0, 500) + '...' : m.text,
-				type: m.type,
-			}))
-		};
-	},
-};
-
-function getPersonaTools() {
-	if (!persona.tools) return ASK_TOOLS;
-	const enabled = new Set(persona.tools);
-	return ASK_TOOLS.filter(t => enabled.has(t.function.name));
-}
-
 const askChatHistory = new Map();
 const ASK_HISTORY_TTL = 8 * 60 * 60 * 1000;
 const ASK_HISTORY_MAX = 200;
-
-const MOOD_BASELINE = 30;
-const DECAY_INTERVAL = 60 * 60 * 1000;
-
-function decayValue(current) {
-	if (current === MOOD_BASELINE) return current;
-	const step = Math.min(5, Math.abs(current - MOOD_BASELINE));
-	return current + (current > MOOD_BASELINE ? -step : step);
-}
-
-function decayToBaseline() {
-	const mood = memory.getMood();
-	if (mood !== MOOD_BASELINE) {
-		const next = memory.setMood(decayValue(mood));
-		console.log(`Mood decay: ${mood} → ${next}`);
-	}
-	const debug = memory.getDebugData();
-	for (const [user, val] of Object.entries(debug.attitudes)) {
-		if (val !== MOOD_BASELINE) {
-			const next = memory.setAttitude(user, decayValue(val));
-			console.log(`Attitude decay [${user}]: ${val} → ${next}`);
-		}
-	}
-}
-
-setInterval(() => {
-	for (const chatId of chatScope.listChatIds()) {
-		chatScope.run(chatId, decayToBaseline);
-	}
-}, DECAY_INTERVAL);
-
-function adjustMood(delta) {
-	const prev = memory.getMood();
-	const next = memory.setMood(prev + delta);
-	console.log(`Mood: ${prev} → ${next} (delta: ${delta > 0 ? '+' : ''}${delta})`);
-}
-
-function adjustAttitude(user, delta) {
-	const prev = memory.getAttitude(user);
-	const next = memory.setAttitude(user, prev + delta);
-	console.log(`Attitude [${user}]: ${prev} → ${next} (delta: ${delta > 0 ? '+' : ''}${delta})`);
-}
-
-function clampDelta(n) {
-	return Math.max(-5, Math.min(5, Math.round(Number(n) || 0)));
-}
-
-function parseAskResponse(raw) {
-	try {
-		const parsed = JSON.parse(raw);
-		return {
-			answer: parsed.answer || raw,
-			mood_delta: clampDelta(parsed.mood_delta),
-			attitude_delta: clampDelta(parsed.attitude_delta),
-			memory_ops: Array.isArray(parsed.memory_ops) ? parsed.memory_ops : [],
-		};
-	} catch {
-		return { answer: raw, mood_delta: 0, attitude_delta: 0, memory_ops: [] };
-	}
-}
-
-function applyMemoryOps(ops) {
-	for (const op of ops) {
-		try {
-			if (op.action === 'save') {
-				memory.addFact(op.target, op.fact);
-				console.log(`Memory save [${op.target}]: ${op.fact}`);
-			} else if (op.action === 'replace') {
-				memory.replaceFact(op.target, op.index, op.fact);
-				console.log(`Memory replace [${op.target}][${op.index}]: ${op.fact}`);
-			} else if (op.action === 'delete') {
-				const removed = memory.deleteFact(op.target, op.index);
-				console.log(`Memory delete [${op.target}][${op.index}]: ${removed}`);
-			}
-		} catch (err) {
-			console.error(`Memory op error:`, err.message);
-		}
-	}
-}
-
-function getMoodPrompt(authorTag) {
-	const mood = memory.getMood();
-	const attitude = memory.getAttitude(authorTag);
-	const effective = Math.round((mood + attitude * 2) / 3);
-
-	let moodLine;
-	if (mood <= 30) moodLine = `Общее настроение: ${mood}/100 — ты в хорошем расположении духа.`;
-	else if (mood <= 65) moodLine = `Общее настроение: ${mood}/100 — стандартный режим.`;
-	else moodLine = `Общее настроение: ${mood}/100 — ты на взводе, раздражён.`;
-
-	let attitudeLine;
-	if (attitude <= 30) attitudeLine = `Отношение к ${authorTag}: ${attitude}/100 — тебе нравится этот человек, он заслужил уважение.`;
-	else if (attitude <= 65) attitudeLine = `Отношение к ${authorTag}: ${attitude}/100 — нейтральное, обычный чувак.`;
-	else attitudeLine = `Отношение к ${authorTag}: ${attitude}/100 — этот человек тебя бесит, ты его не уважаешь.`;
-
-	let styleLine;
-	if (effective <= 30) styleLine = `Итог: ${persona.prompts.moodLow}`;
-	else if (effective <= 65) styleLine = `Итог: ${persona.prompts.moodMid}`;
-	else styleLine = `Итог: ${persona.prompts.moodHigh}`;
-
-	const memorySummary = memory.getMemorySummary(authorTag);
-	const memoryLine = memorySummary ? `\nПАМЯТЬ:\n${memorySummary}` : '';
-
-	return `${moodLine}\n${attitudeLine}\n${styleLine}${memoryLine}`;
-}
 
 function pruneAskHistory() {
 	if (askChatHistory.size <= ASK_HISTORY_MAX) return;
@@ -1150,6 +547,78 @@ async function downloadPhoto(ctx) {
 	const publicUrl = `${DATA_URL}/photos/${filename}`;
 	console.log(`Photo saved: ${filename} → ${publicUrl}`);
 	return publicUrl;
+}
+
+const RESPONSE_PROMPT = `Верни JSON: {"answer": "...", "mood_delta": -5..5, "attitude_delta": -5..5, "memory_ops": [...]}
+mood_delta/attitude_delta — шкала 1-100, дельты от -5 до +5.
+Обычный разговор, вопросы → -1, 0, или +1 (мелкие колебания, это нормально).
+Подколы, лёгкая грубость, шутки на грани → +1..+2.
+Вежливость, благодарность, комплименты → -1..-2.
+Явные оскорбления, агрессия → +3..+5.
+Извинения, искреннее раскаяние → -3..-5.
+ВАЖНО: не ставь +3..+5 на обычные подколы или вопросы. Высокие дельты — только за явную агрессию или доброту.
+memory_ops — массив операций с памятью (может быть пустым []):
+  {"action":"save","target":"global"|"@username","fact":"компактный факт"}
+  {"action":"replace","target":"...","index":N,"fact":"обновлённый факт"}
+  {"action":"delete","target":"...","index":N}
+ПРАВИЛА ЗАПОМИНАНИЯ:
+- Сохраняй ВЫВОДЫ о человеке, а не цитаты из чата. Не "сказал что купил квартиру", а "владеет новой квартирой". Не "обсуждал мотоцикл", а "ездит на мотоцикле".
+- Сохраняй только устойчивые факты: профессия, хобби, имущество, привычки, предпочтения, навыки, жизненные события (переезд, свадьба, работа). Не сохраняй планы на вечер, настроение, мимолётные реплики.
+- Обновляй существующие факты вместо дублирования. Индексы — из раздела ПАМЯТЬ в контексте.
+- Не жди команды "запомни" — если из сообщения можно сделать вывод о человеке, сохрани.`;
+
+async function runAskWithTools(client, messages, heroes, playersMap, authorTag) {
+	const step1 = await client.chat.completions.create({
+		model: GPT_MODEL_MINI,
+		max_tokens: 300,
+		messages,
+		tools: getPersonaTools(),
+	});
+
+	const choice = step1.choices[0];
+
+	if (choice.message.tool_calls?.length) {
+		messages.push(choice.message);
+
+		const toolResults = await Promise.all(
+			choice.message.tool_calls.map(async (tc) => {
+				const handler = ASK_TOOL_HANDLERS[tc.function.name];
+				if (!handler) return { tool_call_id: tc.id, content: '{"error":"unknown function"}' };
+				try {
+					const args = JSON.parse(tc.function.arguments);
+					const result = await handler(args, heroes, playersMap);
+					return { tool_call_id: tc.id, content: JSON.stringify(result) };
+				} catch (err) {
+					return { tool_call_id: tc.id, content: JSON.stringify({ error: err.message }) };
+				}
+			})
+		);
+
+		toolResults.forEach(tr => {
+			messages.push({ role: 'tool', tool_call_id: tr.tool_call_id, content: tr.content });
+		});
+	}
+
+	const step2 = await client.chat.completions.create({
+		model: GPT_MODEL,
+		max_tokens: 900,
+		response_format: { type: 'json_object' },
+		messages: [
+			...messages,
+			{ role: 'system', content: `Ответь на вопрос по полученным данным. Помни: ${persona.prompts.styleShort}
+
+${getMoodPrompt(authorTag)}
+
+${RESPONSE_PROMPT}` }
+		],
+	});
+
+	const { answer, mood_delta, attitude_delta, memory_ops } = parseAskResponse(step2.choices[0].message.content);
+	if (mood_delta) adjustMood(mood_delta);
+	if (attitude_delta) adjustAttitude(authorTag, attitude_delta);
+	if (memory_ops.length) applyMemoryOps(memory_ops);
+	messages.push({ role: 'assistant', content: answer });
+	return answer;
 }
 
 async function handleAsk(ctx) {
@@ -1225,148 +694,14 @@ ${getMoodPrompt(authorTag)}` },
 			: `[${authorTag}]: ${question}` }
 	];
 
-	const step1 = await client.chat.completions.create({
-		model: GPT_MODEL_MINI,
-		max_tokens: 300,
-		messages,
-		tools: getPersonaTools(),
-	});
-
-	const choice = step1.choices[0];
-
-	if (choice.message.tool_calls?.length) {
-		messages.push(choice.message);
-
-		const toolResults = await Promise.all(
-			choice.message.tool_calls.map(async (tc) => {
-				const handler = ASK_TOOL_HANDLERS[tc.function.name];
-				if (!handler) return { tool_call_id: tc.id, content: '{"error":"unknown function"}' };
-				try {
-					const args = JSON.parse(tc.function.arguments);
-					const result = await handler(args, heroes, playersMap);
-					return { tool_call_id: tc.id, content: JSON.stringify(result) };
-				} catch (err) {
-					return { tool_call_id: tc.id, content: JSON.stringify({ error: err.message }) };
-				}
-			})
-		);
-
-		toolResults.forEach(tr => {
-			messages.push({ role: 'tool', tool_call_id: tr.tool_call_id, content: tr.content });
-		});
-	}
-
-	const step2 = await client.chat.completions.create({
-		model: GPT_MODEL,
-		max_tokens: 900,
-		response_format: { type: 'json_object' },
-		messages: [
-			...messages,
-			{ role: 'system', content: `Ответь на вопрос по полученным данным. Помни: ${persona.prompts.styleShort}
-
-${getMoodPrompt(authorTag)}
-
-Верни JSON: {"answer": "...", "mood_delta": -5..5, "attitude_delta": -5..5, "memory_ops": [...]}
-mood_delta/attitude_delta — шкала 1-100, дельты от -5 до +5.
-Обычный разговор, вопросы → -1, 0, или +1 (мелкие колебания, это нормально).
-Подколы, лёгкая грубость, шутки на грани → +1..+2.
-Вежливость, благодарность, комплименты → -1..-2.
-Явные оскорбления, агрессия → +3..+5.
-Извинения, искреннее раскаяние → -3..-5.
-ВАЖНО: не ставь +3..+5 на обычные подколы или вопросы. Высокие дельты — только за явную агрессию или доброту.
-memory_ops — массив операций с памятью (может быть пустым []):
-  {"action":"save","target":"global"|"@username","fact":"компактный факт"}
-  {"action":"replace","target":"...","index":N,"fact":"обновлённый факт"}
-  {"action":"delete","target":"...","index":N}
-ПРАВИЛА ЗАПОМИНАНИЯ:
-- Сохраняй ВЫВОДЫ о человеке, а не цитаты из чата. Не "сказал что купил квартиру", а "владеет новой квартирой". Не "обсуждал мотоцикл", а "ездит на мотоцикле".
-- Сохраняй только устойчивые факты: профессия, хобби, имущество, привычки, предпочтения, навыки, жизненные события (переезд, свадьба, работа). Не сохраняй планы на вечер, настроение, мимолётные реплики.
-- Обновляй существующие факты вместо дублирования. Индексы — из раздела ПАМЯТЬ в контексте.
-- Не жди команды "запомни" — если из сообщения можно сделать вывод о человеке, сохрани.` }
-		],
-	});
-
-	const { answer, mood_delta, attitude_delta, memory_ops } = parseAskResponse(step2.choices[0].message.content);
-	if (mood_delta) adjustMood(mood_delta);
-	if (attitude_delta) adjustAttitude(authorTag, attitude_delta);
-	if (memory_ops.length) applyMemoryOps(memory_ops);
-	messages.push({ role: 'assistant', content: answer });
+	const answer = await runAskWithTools(client, messages, heroes, playersMap, authorTag);
 	const displayAnswer = ctx.voiceTranscript
 		? `«${ctx.voiceTranscript}»\n\n${answer}`
 		: answer;
 	const sent = await reply(displayAnswer);
+	saveChatMessage({ from: persona.command, name: persona.name, text: answer, ts: Math.floor(Date.now() / 1000), type: 'bot' });
 	askChatHistory.set(sent.message_id, { messages, ts: Date.now() });
 	pruneAskHistory();
-}
-
-async function runAskWithTools(client, messages, heroes, playersMap, authorTag) {
-	const step1 = await client.chat.completions.create({
-		model: GPT_MODEL_MINI,
-		max_tokens: 300,
-		messages,
-		tools: getPersonaTools(),
-	});
-
-	const choice = step1.choices[0];
-
-	if (choice.message.tool_calls?.length) {
-		messages.push(choice.message);
-
-		const toolResults = await Promise.all(
-			choice.message.tool_calls.map(async (tc) => {
-				const handler = ASK_TOOL_HANDLERS[tc.function.name];
-				if (!handler) return { tool_call_id: tc.id, content: '{"error":"unknown function"}' };
-				try {
-					const args = JSON.parse(tc.function.arguments);
-					const result = await handler(args, heroes, playersMap);
-					return { tool_call_id: tc.id, content: JSON.stringify(result) };
-				} catch (err) {
-					return { tool_call_id: tc.id, content: JSON.stringify({ error: err.message }) };
-				}
-			})
-		);
-
-		toolResults.forEach(tr => {
-			messages.push({ role: 'tool', tool_call_id: tr.tool_call_id, content: tr.content });
-		});
-	}
-
-	const step2 = await client.chat.completions.create({
-		model: GPT_MODEL,
-		max_tokens: 900,
-		response_format: { type: 'json_object' },
-		messages: [
-			...messages,
-			{ role: 'system', content: `Ответь на вопрос по полученным данным. Помни: ${persona.prompts.styleShort}
-
-${getMoodPrompt(authorTag)}
-
-Верни JSON: {"answer": "...", "mood_delta": -5..5, "attitude_delta": -5..5, "memory_ops": [...]}
-mood_delta/attitude_delta — шкала 1-100, дельты от -5 до +5.
-Обычный разговор, вопросы → -1, 0, или +1 (мелкие колебания, это нормально).
-Подколы, лёгкая грубость, шутки на грани → +1..+2.
-Вежливость, благодарность, комплименты → -1..-2.
-Явные оскорбления, агрессия → +3..+5.
-Извинения, искреннее раскаяние → -3..-5.
-ВАЖНО: не ставь +3..+5 на обычные подколы или вопросы. Высокие дельты — только за явную агрессию или доброту.
-memory_ops — массив операций с памятью (может быть пустым []):
-  {"action":"save","target":"global"|"@username","fact":"компактный факт"}
-  {"action":"replace","target":"...","index":N,"fact":"обновлённый факт"}
-  {"action":"delete","target":"...","index":N}
-ПРАВИЛА ЗАПОМИНАНИЯ:
-- Сохраняй ВЫВОДЫ о человеке, а не цитаты из чата. Не "сказал что купил квартиру", а "владеет новой квартирой". Не "обсуждал мотоцикл", а "ездит на мотоцикле".
-- Сохраняй только устойчивые факты: профессия, хобби, имущество, привычки, предпочтения, навыки, жизненные события (переезд, свадьба, работа). Не сохраняй планы на вечер, настроение, мимолётные реплики.
-- Обновляй существующие факты вместо дублирования. Индексы — из раздела ПАМЯТЬ в контексте.
-- Не жди команды "запомни" — если из сообщения можно сделать вывод о человеке, сохрани.` }
-		],
-	});
-
-	const { answer, mood_delta, attitude_delta, memory_ops } = parseAskResponse(step2.choices[0].message.content);
-	if (mood_delta) adjustMood(mood_delta);
-	if (attitude_delta) adjustAttitude(authorTag, attitude_delta);
-	if (memory_ops.length) applyMemoryOps(memory_ops);
-	messages.push({ role: 'assistant', content: answer });
-	return answer;
 }
 
 async function handleAskReply(ctx) {
@@ -1409,6 +744,7 @@ async function handleAskReply(ctx) {
 
 	const answer = await runAskWithTools(client, messages, heroes, playersMap, authorTag);
 	const sent = await reply(answer);
+	saveChatMessage({ from: persona.command, name: persona.name, text: answer, ts: Math.floor(Date.now() / 1000), type: 'bot' });
 	askChatHistory.set(sent.message_id, { messages, ts: Date.now() });
 	pruneAskHistory();
 	return true;
@@ -1482,54 +818,6 @@ function getDebugInfo() {
 	return `<blockquote>${lines.join('\n')}</blockquote>`;
 }
 
-async function handleRandomInterjection(recentMessages) {
-	const OpenAI = require('openai');
-	const client = new OpenAI();
-
-	const chatContext = recentMessages
-		.map(m => `[${m.name}]: ${m.text}`)
-		.join('\n');
-
-	const response = await client.chat.completions.create({
-		model: GPT_MODEL,
-		max_tokens: 600,
-		messages: [
-			{ role: 'system', content: `${persona.prompts.identity}
-
-${persona.prompts.style}
-
-Ты сидишь в групповом чате и наблюдаешь за перепиской. Ниже последние сообщения. Если тебе как ${persona.name} есть что вставить — едкий комментарий, неожиданная мысль, реакция — напиши. Это должно быть действительно к месту. Не натягивай: если нечего сказать — ответь ровно одним словом: SKIP` },
-			{ role: 'user', content: chatContext }
-		]
-	});
-
-	const answer = response.choices[0].message.content?.trim();
-	if (!answer || answer.toUpperCase().startsWith('SKIP')) return null;
-	return answer;
-}
-
-async function handleCrossBotReply(botText, botName) {
-	const OpenAI = require('openai');
-	const client = new OpenAI();
-
-	const response = await client.chat.completions.create({
-		model: GPT_MODEL,
-		max_tokens: 600,
-		messages: [
-			{ role: 'system', content: `${persona.prompts.identity}
-
-${persona.prompts.style}
-
-В групповом чате другая личность (${botName}) написала сообщение. Если тебе как ${persona.name} есть что добавить — реакция, несогласие, дополнение, свой анализ, подъёб — напиши ответ. Не натягивай: если тема тебя не касается или добавить нечего — ответь ровно одним словом: SKIP` },
-			{ role: 'user', content: botText }
-		]
-	});
-
-	const answer = response.choices[0].message.content?.trim();
-	if (!answer || answer.toUpperCase().startsWith('SKIP')) return null;
-	return answer;
-}
-
 module.exports = {
 	sendReport,
 	sendPlayerWinrate,
@@ -1544,9 +832,7 @@ module.exports = {
 	generateChallenge,
 	handleAsk,
 	handleAskReply,
-	handleCrossBotReply,
-	handleRandomInterjection,
 	getDebugInfo,
 	deleteMessage,
-	deleteAction
+	deleteAction,
 };
