@@ -81,8 +81,10 @@ bot.use(async (ctx, next) => {
 		const ts = ctx.message.date;
 		const text = ctx.message.text || ctx.message.caption;
 
+		const msgId = ctx.message.message_id;
+
 		if (from?.is_bot) {
-			if (text) saveChatMessage({ from: tag, name, text, ts, type: 'bot' });
+			if (text) saveChatMessage({ from: tag, name, text, ts, type: 'bot', msgId });
 			return next();
 		}
 
@@ -90,7 +92,7 @@ bot.use(async (ctx, next) => {
 		if (chatId) crossBot.resetChain(chatId);
 
 		if (text) {
-			saveChatMessage({ from: tag, name, text, ts, type: 'text' });
+			saveChatMessage({ from: tag, name, text, ts, type: 'text', msgId });
 		}
 	} catch (err) {
 		console.error('Chat log error:', err.message);

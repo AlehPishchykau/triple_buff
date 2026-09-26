@@ -136,9 +136,10 @@ function getMemorySummary(username) {
 
 const CHATLOG_MAX_AGE = 7 * 86400;
 
-function saveChatMessage({ from, name, text, ts, type }) {
+function saveChatMessage({ from, name, text, ts, type, msgId }) {
 	const log = readJSON(chatlogPath(), []);
-	log.push({ from, name, text, ts, type });
+	if (msgId && log.some(m => m.msgId === msgId)) return;
+	log.push({ from, name, text, ts, type, ...(msgId ? { msgId } : {}) });
 	const cutoff = Math.floor(Date.now() / 1000) - CHATLOG_MAX_AGE;
 	writeJSON(chatlogPath(), log.filter(m => m.ts > cutoff));
 }
