@@ -1,4 +1,4 @@
-const { OPENDOTA_API_URL } = require('./constants');
+const OPENDOTA_API_URL = 'https://api.opendota.com/api';
 
 async function openDotaGet(path, retries = 2) {
 	const response = await fetch(`${OPENDOTA_API_URL}${path}`);
