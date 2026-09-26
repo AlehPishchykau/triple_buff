@@ -66,5 +66,7 @@ module.exports = {
 		'get_last_group_match', 'web_search', 'get_chat_history',
 	],
 
+	crossBot: { replyChance: 0.3, maxChain: 2, cooldownMs: 120000, randomChance: 0.01, randomCooldownMs: 600000 },
+
 	cron: { schedule: '0 9 * * *', timezone: 'Europe/Vilnius' },
 };

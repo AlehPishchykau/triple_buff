@@ -4,7 +4,7 @@ const path = require('path');
 const os = require('os');
 const cron = require('node-cron');
 const { Markup, Telegraf } = require('telegraf');
-const { saveChatMessage, getVoiceTranscribe, setVoiceTranscribe } = require('./memory');
+const { saveChatMessage, getChatMessages, getVoiceTranscribe, setVoiceTranscribe } = require('./memory');
 const persona = require('./persona');
 const chatScope = require('./chatScope');
 
@@ -22,6 +22,8 @@ const {
 	generateChallenge,
 	handleAsk,
 	handleAskReply,
+	handleCrossBotReply,
+	handleRandomInterjection,
 	getDebugInfo,
 	deleteMessage,
 	deleteAction,
@@ -32,6 +34,23 @@ const players = require('./players');
 const { TELEGRAM_BOT_TOKEN } = process.env;
 
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
+
+const crossBotState = {};
+
+function resetCrossBotChain(chatId) {
+	if (crossBotState[chatId]) crossBotState[chatId].chainCount = 0;
+}
+
+function canReplyToBot(chatId) {
+	const config = persona.crossBot;
+	if (!config) return false;
+	if (!crossBotState[chatId]) crossBotState[chatId] = { chainCount: 0, lastReplyTs: 0 };
+	const state = crossBotState[chatId];
+	if (state.chainCount >= (config.maxChain || 2)) return false;
+	if (Date.now() - state.lastReplyTs < (config.cooldownMs || 120000)) return false;
+	if (Math.random() > (config.replyChance || 0.3)) return false;
+	return true;
+}
 
 function createTelegramSender(telegram, chatId) {
 	return {
@@ -70,12 +89,19 @@ bot.use(async (ctx, next) => {
 	if (!ctx.message) return next();
 	try {
 		const from = ctx.message.from;
-		if (from?.is_bot) return next();
 		const tag = from.username ? `@${from.username}` : from.first_name;
 		const name = from.first_name || from.username || '???';
 		const ts = ctx.message.date;
-
 		const text = ctx.message.text || ctx.message.caption;
+
+		if (from?.is_bot) {
+			if (text) saveChatMessage({ from: tag, name, text, ts, type: 'bot' });
+			return next();
+		}
+
+		const chatId = ctx.chat?.id;
+		if (chatId) resetCrossBotChain(chatId);
+
 		if (text) {
 			saveChatMessage({ from: tag, name, text, ts, type: 'text' });
 		}
@@ -241,6 +267,27 @@ bot.on('photo', async (ctx, next) => {
 
 bot.on('text', async (ctx, next) => {
 	if (ctx.message.text?.startsWith('/')) return next();
+
+	if (ctx.message.from?.is_bot) {
+		const chatId = ctx.chat.id;
+		if (!crossBotState[chatId]) crossBotState[chatId] = { chainCount: 0, lastReplyTs: 0 };
+		crossBotState[chatId].chainCount++;
+
+		if (canReplyToBot(chatId)) {
+			try {
+				const botName = ctx.message.from.first_name || ctx.message.from.username;
+				const answer = await handleCrossBotReply(ctx.message.text, botName);
+				if (answer) {
+					crossBotState[chatId].lastReplyTs = Date.now();
+					await ctx.reply(answer, { reply_parameters: { message_id: ctx.message.message_id } });
+				}
+			} catch (err) {
+				console.error('Cross-bot reply error:', err.message);
+			}
+		}
+		return;
+	}
+
 	if (ctx.message.reply_to_message) {
 		try {
 			const handled = await handleAskReply(ctx);
@@ -255,6 +302,31 @@ bot.on('text', async (ctx, next) => {
 		ctx.message.text = `/${persona.command} ${ctx.message.text}`;
 		return askHandler(ctx);
 	}
+
+	const crossCfg = persona.crossBot;
+	if (crossCfg?.randomChance && Math.random() < crossCfg.randomChance) {
+		const chatId = ctx.chat.id;
+		if (!crossBotState[chatId]) crossBotState[chatId] = { chainCount: 0, lastReplyTs: 0, lastRandomTs: 0 };
+		const state = crossBotState[chatId];
+		const randomCooldown = crossCfg.randomCooldownMs || 600000;
+		if (Date.now() - (state.lastRandomTs || 0) > randomCooldown) {
+			try {
+				const now = Math.floor(Date.now() / 1000);
+				const recent = getChatMessages(now - 300, now);
+				if (recent.length >= 2) {
+					const last = recent.slice(-10);
+					const answer = await handleRandomInterjection(last);
+					if (answer) {
+						state.lastRandomTs = Date.now();
+						await ctx.reply(answer, { reply_parameters: { message_id: ctx.message.message_id } });
+					}
+				}
+			} catch (err) {
+				console.error('Random interjection error:', err.message);
+			}
+		}
+	}
+
 	return next();
 });
 
