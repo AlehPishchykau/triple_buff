@@ -59,7 +59,9 @@ module.exports = {
 	],
 
 	tools: [
-		'web_search', 'get_chat_history',
+		'get_player_winrate', 'get_player_heroes', 'get_recent_matches',
+		'get_player_peers', 'get_match_details', 'get_player_totals',
+		'get_last_group_match', 'web_search', 'get_chat_history',
 	],
 
 	crossBot: { replyChance: 0.3, maxChain: 2, cooldownMs: 120000, randomChance: 0.01, randomCooldownMs: 600000 },
