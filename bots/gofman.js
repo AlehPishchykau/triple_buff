@@ -55,7 +55,7 @@ module.exports = {
 	},
 
 	commands: [
-		'report', 'winrate', 'last', 'heroes', 'streak',
+		'winrate', 'last', 'heroes', 'streak',
 		'party', 'week', 'time', 'challenge', 'call',
 		'transcribe',
 	],
