@@ -136,12 +136,41 @@ function getMemorySummary(username) {
 
 const CHATLOG_MAX_AGE = 7 * 86400;
 
+function withFileLock(filePath, fn) {
+	const lockDir = filePath + '.lock';
+	const maxWait = 3000;
+	const start = Date.now();
+	while (true) {
+		try {
+			fs.mkdirSync(lockDir);
+			break;
+		} catch {
+			if (Date.now() - start > maxWait) {
+				fs.rmSync(lockDir, { recursive: true, force: true });
+				fs.mkdirSync(lockDir);
+				break;
+			}
+			const wait = Math.random() * 20 + 5;
+			const end = Date.now() + wait;
+			while (Date.now() < end) {}
+		}
+	}
+	try {
+		return fn();
+	} finally {
+		fs.rmSync(lockDir, { recursive: true, force: true });
+	}
+}
+
 function saveChatMessage({ from, name, text, ts, type, msgId }) {
-	const log = readJSON(chatlogPath(), []);
-	if (msgId && log.some(m => m.msgId === msgId)) return;
-	log.push({ from, name, text, ts, type, ...(msgId ? { msgId } : {}) });
-	const cutoff = Math.floor(Date.now() / 1000) - CHATLOG_MAX_AGE;
-	writeJSON(chatlogPath(), log.filter(m => m.ts > cutoff));
+	const file = chatlogPath();
+	withFileLock(file, () => {
+		const log = readJSON(file, []);
+		if (msgId && log.some(m => m.msgId === msgId)) return;
+		log.push({ from, name, text, ts, type, ...(msgId ? { msgId } : {}) });
+		const cutoff = Math.floor(Date.now() / 1000) - CHATLOG_MAX_AGE;
+		writeJSON(file, log.filter(m => m.ts > cutoff));
+	});
 }
 
 function getChatMessages(fromTs, toTs) {
