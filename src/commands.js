@@ -535,6 +535,11 @@ function pruneAskHistory() {
 	}
 }
 
+function rememberReplyChain(messageId, messages) {
+	askChatHistory.set(messageId, { messages, ts: Date.now() });
+	pruneAskHistory();
+}
+
 async function downloadPhoto(ctx) {
 	const photos = ctx.message.photo;
 	if (!photos?.length) return null;
@@ -832,6 +837,7 @@ module.exports = {
 	generateChallenge,
 	handleAsk,
 	handleAskReply,
+	rememberReplyChain,
 	getDebugInfo,
 	deleteMessage,
 	deleteAction,

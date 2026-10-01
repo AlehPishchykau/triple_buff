@@ -23,6 +23,7 @@ const {
 	generateChallenge,
 	handleAsk,
 	handleAskReply,
+	rememberReplyChain,
 	getDebugInfo,
 	deleteMessage,
 	deleteAction,
@@ -266,11 +267,12 @@ bot.on('text', async (ctx, next) => {
 		if (crossBot.canReplyToBot(chatId)) {
 			try {
 				const botName = ctx.message.from.first_name || ctx.message.from.username;
-				const answer = await crossBot.handleCrossBotReply(ctx.message.text, botName);
-				if (answer) {
+				const result = await crossBot.handleCrossBotReply(ctx.message.text, botName);
+				if (result) {
 					crossBot.markBotReply(chatId);
-					saveBotReply(answer);
-					await ctx.reply(answer, { reply_parameters: { message_id: ctx.message.message_id } });
+					saveBotReply(result.answer);
+					const sent = await ctx.reply(result.answer, { reply_parameters: { message_id: ctx.message.message_id } });
+					rememberReplyChain(sent.message_id, result.messages);
 				}
 			} catch (err) {
 				console.error('Cross-bot reply error:', err.message);
@@ -300,11 +302,12 @@ bot.on('text', async (ctx, next) => {
 			const recent = getChatMessages(now - 300, now);
 			if (recent.length >= 2) {
 				const last = recent.slice(-10);
-				const answer = await crossBot.handleRandomInterjection(last);
-				if (answer) {
+				const result = await crossBot.handleRandomInterjection(last);
+				if (result) {
 					crossBot.markRandomInterjection(ctx.chat.id);
-					saveBotReply(answer);
-					await ctx.reply(answer, { reply_parameters: { message_id: ctx.message.message_id } });
+					saveBotReply(result.answer);
+					const sent = await ctx.reply(result.answer, { reply_parameters: { message_id: ctx.message.message_id } });
+					rememberReplyChain(sent.message_id, result.messages);
 				}
 			}
 		} catch (err) {
