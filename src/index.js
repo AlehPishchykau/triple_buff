@@ -299,10 +299,9 @@ bot.on('text', async (ctx, next) => {
 	if (crossBot.canRandomInterject(ctx.chat.id)) {
 		try {
 			const now = Math.floor(Date.now() / 1000);
-			const recent = getChatMessages(now - 300, now);
-			if (recent.length >= 2) {
-				const last = recent.slice(-10);
-				const result = await crossBot.handleRandomInterjection(last);
+			const recent = getChatMessages(now - 3600, now);
+			if (recent.length >= 3) {
+				const result = await crossBot.handleRandomInterjection(recent.slice(-20));
 				if (result) {
 					crossBot.markRandomInterjection(ctx.chat.id);
 					saveBotReply(result.answer);

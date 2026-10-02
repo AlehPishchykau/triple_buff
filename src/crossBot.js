@@ -68,16 +68,17 @@ async function handleRandomInterjection(recentMessages) {
 	const OpenAI = require('openai');
 	const client = new OpenAI();
 
-	const chatContext = recentMessages
-		.map(m => `[${m.name}]: ${m.text}`)
-		.join('\n');
+	const format = m => `[${m.name}]: ${m.text}`;
+	const earlier = recentMessages.slice(0, -1).map(format).join('\n');
+	const last = format(recentMessages[recentMessages.length - 1]);
+	const chatContext = `Предыдущая переписка:\n${earlier}\n\nПоследнее сообщение (на него ты отвечаешь реплаем):\n${last}`;
 
 	return complete(client, [
 		{ role: 'system', content: `${persona.prompts.identity}
 
 ${persona.prompts.style}
 
-Ты сидишь в групповом чате и наблюдаешь за перепиской. Ниже последние сообщения. Если тебе как ${persona.name} есть что вставить — едкий комментарий, неожиданная мысль, реакция — напиши. Это должно быть действительно к месту. Не натягивай: если нечего сказать — ответь ровно одним словом: SKIP` },
+Ты сидишь в групповом чате и наблюдаешь за перепиской. Ниже переписка за последний час и отдельно последнее сообщение. Сначала пойми, о чём идёт разговор в целом: кто что обсуждает, к чему относится последнее сообщение. Твоя реплика должна учитывать контекст всей переписки, а не только последней фразы. Если тебе как ${persona.name} есть что вставить — едкий комментарий, неожиданная мысль, реакция — напиши. Это должно быть действительно к месту. Не натягивай: если нечего сказать — ответь ровно одним словом: SKIP` },
 		{ role: 'user', content: chatContext }
 	]);
 }
