@@ -193,7 +193,7 @@ bot.command('call', safeCommand(async (ctx) => {
 		await ctx.replyWithHTML('<blockquote>Нет зарегистрированных игроков</blockquote>');
 		return;
 	}
-	await ctx.reply(`Официальный колл от ${name}. Какая готовность?\n\n${others.join(' ')}`);
+	await ctx.reply(`Официальный колл от ${name}. В хуй попердеть никто не желает?\n\n${others.join(' ')}`);
 }));
 
 bot.command('register', safeCommand(async (ctx) => {
