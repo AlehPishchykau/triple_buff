@@ -111,6 +111,14 @@ describe('memory', () => {
 	});
 
 	describe('chatlog', () => {
+		it('saves the first message of a chat whose directory does not exist yet', () => {
+			chatScope.run('-4118387787', () => {
+				const now = Math.floor(Date.now() / 1000);
+				memory.saveChatMessage({ from: '@a', name: 'A', text: 'first', ts: now, type: 'text' });
+				assert.equal(memory.getChatMessages(now - 1, now + 1).length, 1);
+			});
+		});
+
 		it('saves and retrieves messages', () => {
 			withinChat(() => {
 				const now = Math.floor(Date.now() / 1000);

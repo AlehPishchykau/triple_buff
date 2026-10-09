@@ -138,6 +138,7 @@ const CHATLOG_MAX_AGE = 7 * 86400;
 
 function withFileLock(filePath, fn) {
 	const lockDir = filePath + '.lock';
+	ensureDir(path.dirname(filePath));
 	const maxWait = 3000;
 	const start = Date.now();
 	while (true) {

@@ -26,6 +26,10 @@ async function sendReport(ctx, period = 'yesterday') {
 	const heroes = await storage.getHeroes();
 
 	const parsedMatchesData = parseMatchesData(matchesData);
+	if (!Object.keys(parsedMatchesData.players).length) {
+		if (period !== 'yesterday') await ctx.replyWithHTML('<blockquote>За этот период матчей не было</blockquote>');
+		return;
+	}
 
 	const aiReport = await generateAIReport(parsedMatchesData, playersData, heroes, period);
 	if (aiReport) {
@@ -705,8 +709,7 @@ ${getMoodPrompt(authorTag)}` },
 		: answer;
 	const sent = await reply(displayAnswer);
 	saveChatMessage({ from: persona.command, name: persona.name, text: answer, ts: Math.floor(Date.now() / 1000), type: 'bot' });
-	askChatHistory.set(sent.message_id, { messages, ts: Date.now() });
-	pruneAskHistory();
+	rememberReplyChain(sent.message_id, [...messages, { role: 'assistant', content: answer }]);
 }
 
 async function handleAskReply(ctx) {
@@ -735,7 +738,7 @@ async function handleAskReply(ctx) {
 	const fromUser = ctx.message.from;
 	const authorTag = fromUser.username ? `@${fromUser.username}` : fromUser.first_name;
 
-	const prev = history.messages.filter(m => m.role === 'system' || m.role === 'user' || (m.role === 'assistant' && typeof m.content === 'string'));
+	const prev = history.messages.filter(m => m.role === 'system' || m.role === 'user' || (m.role === 'assistant' && typeof m.content === 'string' && !m.tool_calls?.length));
 	const messages = [
 		...prev,
 		{ role: 'system', content: `Сейчас с тобой говорит: ${authorTag}. Отвечай именно ему. Mood/attitude применяй к нему. Сегодняшняя дата: ${new Date().toISOString().slice(0, 10)}. Если вопрос про переписку или уточнение по ней — вызови get_chat_history, не отвечай по памяти.\n${getMoodPrompt(authorTag)}` },
@@ -750,8 +753,7 @@ async function handleAskReply(ctx) {
 	const answer = await runAskWithTools(client, messages, heroes, playersMap, authorTag);
 	const sent = await reply(answer);
 	saveChatMessage({ from: persona.command, name: persona.name, text: answer, ts: Math.floor(Date.now() / 1000), type: 'bot' });
-	askChatHistory.set(sent.message_id, { messages, ts: Date.now() });
-	pruneAskHistory();
+	rememberReplyChain(sent.message_id, [...messages, { role: 'assistant', content: answer }]);
 	return true;
 }
 

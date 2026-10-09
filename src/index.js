@@ -31,7 +31,7 @@ const {
 const { refreshPlayers, fetchPlayerData } = require('./requests');
 const { storage } = require('./storage');
 const players = require('./players');
-const { TELEGRAM_BOT_TOKEN } = process.env;
+const TELEGRAM_BOT_TOKEN = process.env[`TELEGRAM_BOT_TOKEN_${persona.command.toUpperCase()}`] || process.env.TELEGRAM_BOT_TOKEN;
 
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 
