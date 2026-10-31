@@ -44,7 +44,7 @@ function createTelegramSender(telegram, chatId) {
 
 function userFacingError(err) {
 	const msg = err?.message || '';
-	if (/timed out|Time-out|Timeout|ETIMEDOUT|ECONNRESET|EAI_AGAIN|^5\d\d:/i.test(msg)) {
+	if (/timed out|Time-out|Timeout|abort|ETIMEDOUT|ECONNRESET|EAI_AGAIN|^5\d\d:/i.test(msg)) {
 		return 'Сервис временно не отвечает, попробуй ещё раз через минуту.';
 	}
 	return `Ошибка: ${msg}`;
@@ -59,9 +59,32 @@ async function timed(label, fn) {
 	}
 }
 
+const FILE_API_TIMEOUT_MS = 15000;
+const FILE_API_ATTEMPTS = 2;
+
+// Telegram's getFile occasionally hangs for a given bot instance (observed 120s → 504),
+// while Telegraf's own request timeout is 500s. Bound each attempt and retry once.
+async function getFileLinkWithTimeout(telegram, fileId) {
+	let lastErr;
+	for (let attempt = 1; attempt <= FILE_API_ATTEMPTS; attempt++) {
+		const ctl = new AbortController();
+		const timer = setTimeout(() => ctl.abort(), FILE_API_TIMEOUT_MS);
+		try {
+			const file = await telegram.callApi('getFile', { file_id: fileId }, { signal: ctl.signal });
+			return await telegram.getFileLink(file);
+		} catch (err) {
+			lastErr = err;
+			console.error(`getFile attempt ${attempt}/${FILE_API_ATTEMPTS} failed: ${err.message}`);
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+	throw lastErr;
+}
+
 async function transcribeAudio(telegram, fileId, ext = 'ogg') {
-	const fileLink = await timed('voice getFileLink', () => telegram.getFileLink(fileId));
-	const res = await timed('voice download', () => fetch(fileLink.href));
+	const fileLink = await timed('voice getFileLink', () => getFileLinkWithTimeout(telegram, fileId));
+	const res = await timed('voice download', () => fetch(fileLink.href, { signal: AbortSignal.timeout(FILE_API_TIMEOUT_MS * 2) }));
 	if (!res.ok) throw new Error(`${res.status}: ${res.statusText} (file download)`);
 	const buffer = Buffer.from(await res.arrayBuffer());
 	const tmpPath = path.join(os.tmpdir(), `audio_${Date.now()}.${ext}`);
