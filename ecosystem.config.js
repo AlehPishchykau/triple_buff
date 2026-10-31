@@ -3,6 +3,8 @@ module.exports = {
 		{
 			name: 'billy',
 			script: 'src/index.js',
+			node_args: '--dns-result-order=ipv4first',
+			time: true,
 			env: {
 				BOT_CONFIG: './bots/billy.js',
 			},
@@ -10,6 +12,8 @@ module.exports = {
 		{
 			name: 'gofman',
 			script: 'src/index.js',
+			node_args: '--dns-result-order=ipv4first',
+			time: true,
 			env: {
 				BOT_CONFIG: './bots/gofman.js',
 			},
@@ -17,6 +21,8 @@ module.exports = {
 		{
 			name: 'jesus',
 			script: 'src/index.js',
+			node_args: '--dns-result-order=ipv4first',
+			time: true,
 			env: {
 				BOT_CONFIG: './bots/jesus.js',
 			},

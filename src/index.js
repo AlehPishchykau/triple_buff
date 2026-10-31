@@ -42,6 +42,14 @@ function createTelegramSender(telegram, chatId) {
 	};
 }
 
+function userFacingError(err) {
+	const msg = err?.message || '';
+	if (/timed out|Time-out|Timeout|ETIMEDOUT|ECONNRESET|EAI_AGAIN|^5\d\d:/i.test(msg)) {
+		return 'Сервис временно не отвечает, попробуй ещё раз через минуту.';
+	}
+	return `Ошибка: ${msg}`;
+}
+
 async function transcribeAudio(telegram, fileId, ext = 'ogg') {
 	const fileLink = await telegram.getFileLink(fileId);
 	const res = await fetch(fileLink.href);
@@ -350,7 +358,7 @@ bot.on(['voice', 'video_note'], async (ctx, next) => {
 		}
 	} catch (err) {
 		console.error('Voice handler error:', err.message);
-		try { await ctx.reply(`Ошибка: ${err.message}`, { reply_parameters: { message_id: ctx.message.message_id } }); } catch (_) {}
+		try { await ctx.reply(userFacingError(err), { reply_parameters: { message_id: ctx.message.message_id } }); } catch (_) {}
 	}
 	return next();
 });
@@ -475,7 +483,7 @@ startDecayTimer();
 bot.catch(async (err, ctx) => {
 	console.error(`Error for ${ctx.updateType}:`, err.message);
 	try {
-		await ctx.replyWithHTML(`<blockquote>Ошибка: ${err.message}</blockquote>`);
+		await ctx.replyWithHTML(`<blockquote>${userFacingError(err)}</blockquote>`);
 	} catch (_) {}
 });
 
