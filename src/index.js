@@ -50,20 +50,30 @@ function userFacingError(err) {
 	return `Ошибка: ${msg}`;
 }
 
+async function timed(label, fn) {
+	const started = Date.now();
+	try {
+		return await fn();
+	} finally {
+		console.log(`[timing] ${label}: ${((Date.now() - started) / 1000).toFixed(1)}s`);
+	}
+}
+
 async function transcribeAudio(telegram, fileId, ext = 'ogg') {
-	const fileLink = await telegram.getFileLink(fileId);
-	const res = await fetch(fileLink.href);
+	const fileLink = await timed('voice getFileLink', () => telegram.getFileLink(fileId));
+	const res = await timed('voice download', () => fetch(fileLink.href));
+	if (!res.ok) throw new Error(`${res.status}: ${res.statusText} (file download)`);
 	const buffer = Buffer.from(await res.arrayBuffer());
 	const tmpPath = path.join(os.tmpdir(), `audio_${Date.now()}.${ext}`);
 	fs.writeFileSync(tmpPath, buffer);
 	try {
 		const OpenAI = require('openai');
 		const client = new OpenAI();
-		const result = await client.audio.transcriptions.create({
+		const result = await timed(`voice whisper (${buffer.length}b)`, () => client.audio.transcriptions.create({
 			file: fs.createReadStream(tmpPath),
 			model: 'whisper-1',
 			language: 'ru',
-		});
+		}));
 		return result.text;
 	} finally {
 		try { fs.unlinkSync(tmpPath); } catch (_) {}
@@ -329,6 +339,8 @@ bot.on(['voice', 'video_note'], async (ctx, next) => {
 	const file = ctx.message.voice || ctx.message.video_note;
 	if (!file) return next();
 
+	const voiceStarted = Date.now();
+	console.log(`[timing] voice received from ${ctx.message.from?.username || ctx.message.from?.id}, duration=${file.duration}s, msg_age=${Math.floor(Date.now() / 1000) - ctx.message.date}s`);
 	try {
 		const ext = ctx.message.voice ? 'ogg' : 'mp4';
 		const transcript = await transcribeAudio(ctx.telegram, file.file_id, ext);
@@ -357,7 +369,7 @@ bot.on(['voice', 'video_note'], async (ctx, next) => {
 			}).catch(() => {});
 		}
 	} catch (err) {
-		console.error('Voice handler error:', err.message);
+		console.error(`Voice handler error after ${((Date.now() - voiceStarted) / 1000).toFixed(1)}s:`, err.message);
 		try { await ctx.reply(userFacingError(err), { reply_parameters: { message_id: ctx.message.message_id } }); } catch (_) {}
 	}
 	return next();

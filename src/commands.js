@@ -703,11 +703,15 @@ ${getMoodPrompt(authorTag)}` },
 			: `[${authorTag}]: ${question}` }
 	];
 
+	let t0 = Date.now();
 	const answer = await runAskWithTools(client, messages, heroes, playersMap, authorTag);
+	console.log(`[timing] ask openai: ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 	const displayAnswer = ctx.voiceTranscript
 		? `«${ctx.voiceTranscript}»\n\n${answer}`
 		: answer;
+	t0 = Date.now();
 	const sent = await reply(displayAnswer);
+	console.log(`[timing] ask reply sendMessage: ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 	saveChatMessage({ from: persona.command, name: persona.name, text: answer, ts: Math.floor(Date.now() / 1000), type: 'bot' });
 	rememberReplyChain(sent.message_id, [...messages, { role: 'assistant', content: answer }]);
 }
