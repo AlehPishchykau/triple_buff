@@ -59,56 +59,29 @@ async function timed(label, fn) {
 	}
 }
 
-const FILE_API_TIMEOUT_MS = 15000;
-const FILE_API_ATTEMPTS = 2;
-const FILE_BREAKER_THRESHOLD = 3;
-const FILE_BREAKER_BASE_MS = 10 * 60 * 1000;
-const FILE_BREAKER_MAX_MS = 60 * 60 * 1000;
-
-// Circuit breaker for Telegram's getFile. For this bot it degrades progressively
-// (1s → 30s → hangs) under load and every retry makes it worse, so after a streak of
-// failures stop calling it for a while (10, 20, 40, 60 min) and probe once afterwards.
-const fileBreaker = { failures: 0, trips: 0, openUntil: 0 };
+const FILE_API_TIMEOUT_MS = 10000;
+const { createFileGate } = require('./fileGate');
+const fileGate = createFileGate();
 
 function fileApiAvailable() {
-	return Date.now() >= fileBreaker.openUntil;
+	return fileGate.available();
 }
 
-function recordFileApiResult(ok) {
-	if (ok) {
-		if (fileBreaker.trips) console.log('[file-breaker] getFile recovered, closing breaker');
-		fileBreaker.failures = 0;
-		fileBreaker.trips = 0;
-		return;
-	}
-	fileBreaker.failures += 1;
-	if (fileBreaker.failures >= FILE_BREAKER_THRESHOLD) {
-		const pause = Math.min(FILE_BREAKER_BASE_MS * 2 ** fileBreaker.trips, FILE_BREAKER_MAX_MS);
-		fileBreaker.trips += 1;
-		fileBreaker.failures = 0;
-		fileBreaker.openUntil = Date.now() + pause;
-		console.error(`[file-breaker] getFile failed ${FILE_BREAKER_THRESHOLD}x in a row, pausing voice downloads for ${Math.round(pause / 60000)} min`);
-	}
-}
-
+// One short attempt behind the gate; a hang trips the gate (see fileGate.js).
 async function getFileLinkWithTimeout(telegram, fileId) {
-	let lastErr;
-	for (let attempt = 1; attempt <= FILE_API_ATTEMPTS; attempt++) {
-		const ctl = new AbortController();
-		const timer = setTimeout(() => ctl.abort(), FILE_API_TIMEOUT_MS);
-		try {
-			const file = await telegram.callApi('getFile', { file_id: fileId }, { signal: ctl.signal });
-			recordFileApiResult(true);
-			return await telegram.getFileLink(file);
-		} catch (err) {
-			lastErr = err;
-			console.error(`getFile attempt ${attempt}/${FILE_API_ATTEMPTS} failed: ${err.message}`);
-		} finally {
-			clearTimeout(timer);
-		}
+	await fileGate.acquire();
+	const ctl = new AbortController();
+	const timer = setTimeout(() => ctl.abort(), FILE_API_TIMEOUT_MS);
+	try {
+		const file = await telegram.callApi('getFile', { file_id: fileId }, { signal: ctl.signal });
+		fileGate.recordResult(true);
+		return await telegram.getFileLink(file);
+	} catch (err) {
+		if (isTransientError(err)) fileGate.recordResult(false);
+		throw err;
+	} finally {
+		clearTimeout(timer);
 	}
-	recordFileApiResult(false);
-	throw lastErr;
 }
 
 async function transcribeAudio(telegram, fileId, ext = 'ogg') {
@@ -414,7 +387,7 @@ async function obtainTranscript(ctx, file) {
 			return transcribeAsOwner();
 		}
 		if (!fileApiAvailable()) {
-			console.log(`[file-breaker] not claiming voice, getFile paused for another ${Math.ceil((fileBreaker.openUntil - Date.now()) / 60000)} min`);
+			console.log(`[file-gate] not claiming voice, downloads paused for another ${Math.ceil(fileGate.pausedForMs() / 60000)} min`);
 		}
 		const result = await voiceShare.waitForVoice(msgId);
 		if (result.status === 'done') {
