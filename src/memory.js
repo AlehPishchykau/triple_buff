@@ -200,4 +200,5 @@ module.exports = {
 	getMemorySummary, getDebugData, savePhoto,
 	saveChatMessage, getChatMessages,
 	getVoiceTranscribe, setVoiceTranscribe,
+	withFileLock,
 };

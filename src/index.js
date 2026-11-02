@@ -5,6 +5,7 @@ const os = require('os');
 const cron = require('node-cron');
 const { Markup, Telegraf } = require('telegraf');
 const { saveChatMessage, getChatMessages, getVoiceTranscribe, setVoiceTranscribe } = require('./memory');
+const voiceShare = require('./voiceShare');
 const persona = require('./persona');
 const chatScope = require('./chatScope');
 const crossBot = require('./crossBot');
@@ -386,25 +387,61 @@ bot.on('text', async (ctx, next) => {
 	return next();
 });
 
+// Only one persona per chat downloads and transcribes a voice message; the rest wait
+// for the text it publishes. A bot whose getFile breaker is open never claims.
+async function obtainTranscript(ctx, file) {
+	const msgId = ctx.message.message_id;
+	const ext = ctx.message.voice ? 'ogg' : 'mp4';
+	const from = ctx.message.from;
+	const tag = from.username ? `@${from.username}` : from.first_name;
+	const name = from.first_name || from.username || '???';
+
+	const transcribeAsOwner = async () => {
+		let transcript;
+		try {
+			transcript = await transcribeAudio(ctx.telegram, file.file_id, ext);
+		} catch (err) {
+			voiceShare.failVoice(msgId);
+			throw err;
+		}
+		voiceShare.completeVoice(msgId, transcript);
+		if (transcript) saveChatMessage({ from: tag, name, text: transcript, ts: ctx.message.date, type: 'voice', msgId });
+		return transcript;
+	};
+
+	for (let round = 0; round < 2; round++) {
+		if (fileApiAvailable() && voiceShare.claimVoice(msgId, persona.command)) {
+			return transcribeAsOwner();
+		}
+		if (!fileApiAvailable()) {
+			console.log(`[file-breaker] not claiming voice, getFile paused for another ${Math.ceil((fileBreaker.openUntil - Date.now()) / 60000)} min`);
+		}
+		const result = await voiceShare.waitForVoice(msgId);
+		if (result.status === 'done') {
+			console.log(`[voice-share] got transcript from ${voiceShare.readVoice(msgId)?.by}`);
+			return result.text;
+		}
+		if (result.status === 'timeout') {
+			console.log('[voice-share] nobody transcribed the voice in time');
+			return null;
+		}
+		// Owner failed — loop once more and try to take over.
+	}
+	return null;
+}
+
 bot.on(['voice', 'video_note'], async (ctx, next) => {
 	const file = ctx.message.voice || ctx.message.video_note;
 	if (!file) return next();
 
 	const voiceStarted = Date.now();
 	console.log(`[timing] voice received from ${ctx.message.from?.username || ctx.message.from?.id}, duration=${file.duration}s, msg_age=${Math.floor(Date.now() / 1000) - ctx.message.date}s`);
-	if (!fileApiAvailable()) {
-		console.log(`[file-breaker] skipping voice, getFile paused for another ${Math.ceil((fileBreaker.openUntil - Date.now()) / 60000)} min`);
-		return next();
-	}
 	try {
-		const ext = ctx.message.voice ? 'ogg' : 'mp4';
-		const transcript = await transcribeAudio(ctx.telegram, file.file_id, ext);
+		const transcript = await obtainTranscript(ctx, file);
 		if (!transcript) return next();
 
 		const from = ctx.message.from;
-		const tag = from.username ? `@${from.username}` : from.first_name;
 		const name = from.first_name || from.username || '???';
-		saveChatMessage({ from: tag, name, text: transcript, ts: ctx.message.date, type: 'voice' });
 
 		if (ctx.message.reply_to_message) {
 			ctx.message.text = transcript;
