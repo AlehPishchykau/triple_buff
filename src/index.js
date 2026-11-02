@@ -42,12 +42,11 @@ function createTelegramSender(telegram, chatId) {
 	};
 }
 
-function userFacingError(err) {
+// Network / upstream hiccups (Telegram 5xx, timeouts, aborted getFile) are logged
+// but never echoed to the chat — they come in bursts and only produce spam.
+function isTransientError(err) {
 	const msg = err?.message || '';
-	if (/timed out|Time-out|Timeout|abort|ETIMEDOUT|ECONNRESET|EAI_AGAIN|^5\d\d:/i.test(msg)) {
-		return 'Сервис временно не отвечает, попробуй ещё раз через минуту.';
-	}
-	return `Ошибка: ${msg}`;
+	return /timed out|Time-out|Timeout|abort|ETIMEDOUT|ECONNRESET|EAI_AGAIN|^5\d\d:/i.test(msg);
 }
 
 async function timed(label, fn) {
@@ -61,9 +60,36 @@ async function timed(label, fn) {
 
 const FILE_API_TIMEOUT_MS = 15000;
 const FILE_API_ATTEMPTS = 2;
+const FILE_BREAKER_THRESHOLD = 3;
+const FILE_BREAKER_BASE_MS = 10 * 60 * 1000;
+const FILE_BREAKER_MAX_MS = 60 * 60 * 1000;
 
-// Telegram's getFile occasionally hangs for a given bot instance (observed 120s → 504),
-// while Telegraf's own request timeout is 500s. Bound each attempt and retry once.
+// Circuit breaker for Telegram's getFile. For this bot it degrades progressively
+// (1s → 30s → hangs) under load and every retry makes it worse, so after a streak of
+// failures stop calling it for a while (10, 20, 40, 60 min) and probe once afterwards.
+const fileBreaker = { failures: 0, trips: 0, openUntil: 0 };
+
+function fileApiAvailable() {
+	return Date.now() >= fileBreaker.openUntil;
+}
+
+function recordFileApiResult(ok) {
+	if (ok) {
+		if (fileBreaker.trips) console.log('[file-breaker] getFile recovered, closing breaker');
+		fileBreaker.failures = 0;
+		fileBreaker.trips = 0;
+		return;
+	}
+	fileBreaker.failures += 1;
+	if (fileBreaker.failures >= FILE_BREAKER_THRESHOLD) {
+		const pause = Math.min(FILE_BREAKER_BASE_MS * 2 ** fileBreaker.trips, FILE_BREAKER_MAX_MS);
+		fileBreaker.trips += 1;
+		fileBreaker.failures = 0;
+		fileBreaker.openUntil = Date.now() + pause;
+		console.error(`[file-breaker] getFile failed ${FILE_BREAKER_THRESHOLD}x in a row, pausing voice downloads for ${Math.round(pause / 60000)} min`);
+	}
+}
+
 async function getFileLinkWithTimeout(telegram, fileId) {
 	let lastErr;
 	for (let attempt = 1; attempt <= FILE_API_ATTEMPTS; attempt++) {
@@ -71,6 +97,7 @@ async function getFileLinkWithTimeout(telegram, fileId) {
 		const timer = setTimeout(() => ctl.abort(), FILE_API_TIMEOUT_MS);
 		try {
 			const file = await telegram.callApi('getFile', { file_id: fileId }, { signal: ctl.signal });
+			recordFileApiResult(true);
 			return await telegram.getFileLink(file);
 		} catch (err) {
 			lastErr = err;
@@ -79,6 +106,7 @@ async function getFileLinkWithTimeout(telegram, fileId) {
 			clearTimeout(timer);
 		}
 	}
+	recordFileApiResult(false);
 	throw lastErr;
 }
 
@@ -364,6 +392,10 @@ bot.on(['voice', 'video_note'], async (ctx, next) => {
 
 	const voiceStarted = Date.now();
 	console.log(`[timing] voice received from ${ctx.message.from?.username || ctx.message.from?.id}, duration=${file.duration}s, msg_age=${Math.floor(Date.now() / 1000) - ctx.message.date}s`);
+	if (!fileApiAvailable()) {
+		console.log(`[file-breaker] skipping voice, getFile paused for another ${Math.ceil((fileBreaker.openUntil - Date.now()) / 60000)} min`);
+		return next();
+	}
 	try {
 		const ext = ctx.message.voice ? 'ogg' : 'mp4';
 		const transcript = await transcribeAudio(ctx.telegram, file.file_id, ext);
@@ -393,7 +425,9 @@ bot.on(['voice', 'video_note'], async (ctx, next) => {
 		}
 	} catch (err) {
 		console.error(`Voice handler error after ${((Date.now() - voiceStarted) / 1000).toFixed(1)}s:`, err.message);
-		try { await ctx.reply(userFacingError(err), { reply_parameters: { message_id: ctx.message.message_id } }); } catch (_) {}
+		if (!isTransientError(err)) {
+			try { await ctx.reply(`Ошибка: ${err.message}`, { reply_parameters: { message_id: ctx.message.message_id } }); } catch (_) {}
+		}
 	}
 	return next();
 });
@@ -517,8 +551,9 @@ startDecayTimer();
 
 bot.catch(async (err, ctx) => {
 	console.error(`Error for ${ctx.updateType}:`, err.message);
+	if (isTransientError(err)) return;
 	try {
-		await ctx.replyWithHTML(`<blockquote>${userFacingError(err)}</blockquote>`);
+		await ctx.replyWithHTML(`<blockquote>Ошибка: ${err.message}</blockquote>`);
 	} catch (_) {}
 });
 
