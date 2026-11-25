@@ -269,7 +269,7 @@ async function gatherToolData(client, messages, heroes, playersMap) {
 async function runAskWithTools(client, messages, heroes, playersMap, authorTag) {
 	// The memory keeper works on the incoming message while data is being gathered, so a
 	// freshly stated rule or fact already applies to (and can be confirmed in) this answer.
-	const memoryUpdate = updateMemory(client, { messages: [...messages], authorTag });
+	const memoryUpdate = updateMemory(client, { messages: [...messages], authorTag, playersMap });
 	await gatherToolData(client, messages, heroes, playersMap);
 	const memoryChanges = await memoryUpdate;
 	const hasDotaData = toolsWithData(messages).some(isDotaTool);

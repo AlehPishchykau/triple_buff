@@ -30,20 +30,24 @@ const KEEPER_PROMPT = `Ты ведёшь долговременную памят
 5. Просьба забыть факт → delete.
 6. Факт о человеке со слов другого участника сохраняй, только если это похоже на реальный факт, и допиши "(со слов @автор)". Подколы, оскорбления и шутки фактами не являются.
 7. НЕ сохраняй: разовые события, планы и намерения, настроение, просьбы на один раз ("ответь коротко"), оценки чьей-то игры в доту и любую игровую статистику (она берётся из OpenDota), то, что уже есть в памяти — в том числе другими словами.
-8. target для факта — только из списка УЧАСТНИКИ. Не уверен, о ком речь, — не сохраняй.
+8. Людей определяй по списку УЧАСТНИКИ: там есть telegram, имя и игровой ник; тёзок различай по нику. target для факта — только из этого списка. Не уверен, о ком речь, — не сохраняй.
 9. Текст записи — короткий вывод, а не цитата. Факт о человеке пиши без имени в начале: "работает в казино", "есть дочки Ксюша и Настя". Относительное время из реплики ("вчера", "на прошлой неделе") переводи в месяц и год по сегодняшней дате; длительность ("уже пять лет") оставляй как есть; если времени в реплике не было — дату не добавляй и не выдумывай. Язык записи — язык, на котором идёт чат.
 10. Не трогай записи, к которым новая реплика не относится. id для update и delete бери только из раздела ПАМЯТЬ; если нужной записи там уже нет — ничего не делай.`;
 
-// tag → display name for everyone the bot could file a fact under
-function knownParticipants(authorTag) {
+// tag → display name for everyone the bot could file a fact under. Steam nicks from
+// playersMap matter: people are often called by them, and two players can share a first name.
+function knownParticipants(authorTag, playersMap = {}) {
 	const people = new Map();
 	for (const tag of memory.getFactTargets()) people.set(tag, null);
-	for (const entry of Object.values(players.load())) {
-		if (entry.telegram) people.set(entry.telegram, entry.name || null);
+	for (const [id, entry] of Object.entries(players.load())) {
+		if (!entry.telegram) continue;
+		const nick = playersMap[id]?.nick;
+		const label = [entry.name, nick && nick !== entry.name ? `ник «${nick}»` : null].filter(Boolean).join(', ');
+		people.set(entry.telegram, label || null);
 	}
 	const now = Math.floor(Date.now() / 1000);
 	for (const m of memory.getChatMessages(now - 7 * 86400, now)) {
-		if (m.type !== 'bot' && m.from) people.set(m.from, m.name || people.get(m.from) || null);
+		if (m.type !== 'bot' && m.from && !people.get(m.from)) people.set(m.from, m.name || null);
 	}
 	if (authorTag && !people.has(authorTag)) people.set(authorTag, null);
 	return people;
@@ -117,11 +121,11 @@ function applyMemoryOps(ops, { participants, by }) {
 }
 
 // Never throws: a memory failure must not cost the user their answer.
-async function updateMemory(client, { messages, authorTag }) {
+async function updateMemory(client, { messages, authorTag, playersMap }) {
 	try {
 		const { message, dialog } = dialogTail(messages);
 		if (!message.trim()) return [];
-		const participants = knownParticipants(authorTag);
+		const participants = knownParticipants(authorTag, playersMap);
 		const response = await client.chat.completions.create({
 			model: process.env.GPT_MODEL_MEMORY || process.env.GPT_MODEL_MINI,
 			max_tokens: 400,

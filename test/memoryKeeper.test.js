@@ -67,9 +67,9 @@ describe('memoryKeeper', () => {
 		memory.addFact('@carol', 'x');
 		memory.saveChatMessage({ from: '@dave', name: 'Дэйв', text: 'hi', ts: Math.floor(Date.now() / 1000), type: 'text' });
 		memory.saveChatMessage({ from: 'billy', name: 'Billy', text: 'yo', ts: Math.floor(Date.now() / 1000), type: 'bot' });
-		const p = knownParticipants('@eve');
+		const p = knownParticipants('@eve', { 1: { name: 'Боб', nick: 'Bobster' } });
 		assert.deepEqual([...p.keys()].sort(), ['@bob', '@carol', '@dave', '@eve']);
-		assert.equal(p.get('@bob'), 'Боб');
+		assert.equal(p.get('@bob'), 'Боб, ник «Bobster»');
 		assert.equal(p.get('@dave'), 'Дэйв');
 	}));
 
