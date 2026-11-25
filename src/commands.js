@@ -7,7 +7,8 @@ const { secondsToTime, sanitizeTelegramHTML } = require('./utils');
 const memory = require('./memory');
 const { saveChatMessage } = memory;
 const { parseMatchesData, getSummary, getMVP, getAwards, PERIOD_LABELS } = require('./matchParser');
-const { adjustMood, adjustAttitude, getMoodPrompt, parseAskResponse, applyMemoryOps } = require('./mood');
+const { adjustMood, adjustAttitude, getMoodPrompt, parseAskResponse } = require('./mood');
+const { updateMemory } = require('./memoryKeeper');
 const { ASK_TOOL_HANDLERS, getPersonaTools, isDotaTool } = require('./askTools');
 const { buildDotaContext, DOTA_ANALYSIS_RULES, DOTA_FOLLOWUP_HINT, ROSTER_MARKER } = require('./askPrompts');
 const { compactHistory, toolsWithData } = require('./askHistory');
@@ -111,7 +112,7 @@ async function generateAIReport(data, playersMap, heroes, period) {
 	const playerCount = Object.keys(data.players).length;
 	const matchCount = wins + loses;
 
-	const factsText = memory.getMemorySummary();
+	const factsText = memory.getMemorySummary(null, { rules: false });
 
 	const context = [
 		`Период: ${periodLabel}`,
@@ -219,23 +220,14 @@ async function downloadPhoto(ctx) {
 	return publicUrl;
 }
 
-const RESPONSE_PROMPT = `Верни JSON: {"answer": "...", "mood_delta": -5..5, "attitude_delta": -5..5, "memory_ops": [...]}
+const RESPONSE_PROMPT = `Верни JSON: {"answer": "...", "mood_delta": -5..5, "attitude_delta": -5..5}
 mood_delta/attitude_delta — шкала 1-100, дельты от -5 до +5.
 Обычный разговор, вопросы → -1, 0, или +1 (мелкие колебания, это нормально).
 Подколы, лёгкая грубость, шутки на грани → +1..+2.
 Вежливость, благодарность, комплименты → -1..-2.
 Явные оскорбления, агрессия → +3..+5.
 Извинения, искреннее раскаяние → -3..-5.
-ВАЖНО: не ставь +3..+5 на обычные подколы или вопросы. Высокие дельты — только за явную агрессию или доброту.
-memory_ops — массив операций с памятью (может быть пустым []):
-  {"action":"save","target":"global"|"@username","fact":"компактный факт"}
-  {"action":"replace","target":"...","index":N,"fact":"обновлённый факт"}
-  {"action":"delete","target":"...","index":N}
-ПРАВИЛА ЗАПОМИНАНИЯ:
-- Сохраняй ВЫВОДЫ о человеке, а не цитаты из чата. Не "сказал что купил квартиру", а "владеет новой квартирой". Не "обсуждал мотоцикл", а "ездит на мотоцикле".
-- Сохраняй только устойчивые факты: профессия, хобби, имущество, привычки, предпочтения, навыки, жизненные события (переезд, свадьба, работа). Не сохраняй планы на вечер, настроение, мимолётные реплики.
-- Обновляй существующие факты вместо дублирования. Индексы — из раздела ПАМЯТЬ в контексте.
-- Не жди команды "запомни" — если из сообщения можно сделать вывод о человеке, сохрани.`;
+ВАЖНО: не ставь +3..+5 на обычные подколы или вопросы. Высокие дельты — только за явную агрессию или доброту.`;
 
 const MAX_TOOL_ROUNDS = 4;
 
@@ -275,8 +267,15 @@ async function gatherToolData(client, messages, heroes, playersMap) {
 }
 
 async function runAskWithTools(client, messages, heroes, playersMap, authorTag) {
+	// The memory keeper works on the incoming message while data is being gathered, so a
+	// freshly stated rule or fact already applies to (and can be confirmed in) this answer.
+	const memoryUpdate = updateMemory(client, { messages: [...messages], authorTag });
 	await gatherToolData(client, messages, heroes, playersMap);
+	const memoryChanges = await memoryUpdate;
 	const hasDotaData = toolsWithData(messages).some(isDotaTool);
+	const memoryNote = memoryChanges.length
+		? `\nПо этой реплике память только что изменена (если уместно, коротко подтверди своими словами, не зачитывай дословно):\n${memoryChanges.map(c => `- ${c}`).join('\n')}\n`
+		: '';
 
 	const step2 = await client.chat.completions.create({
 		model: GPT_MODEL,
@@ -287,17 +286,16 @@ async function runAskWithTools(client, messages, heroes, playersMap, authorTag) 
 		messages: [
 			...messages,
 			{ role: 'system', content: `Ответь на вопрос по полученным данным. Помни: ${persona.prompts.styleShort}
-${hasDotaData ? `\n${DOTA_ANALYSIS_RULES}\n` : ''}
+${hasDotaData ? `\n${DOTA_ANALYSIS_RULES}\n` : ''}${memoryNote}
 ${getMoodPrompt(authorTag)}
 
 ${RESPONSE_PROMPT}` }
 		],
 	});
 
-	const { answer, mood_delta, attitude_delta, memory_ops } = parseAskResponse(step2.choices[0].message.content);
+	const { answer, mood_delta, attitude_delta } = parseAskResponse(step2.choices[0].message.content);
 	if (mood_delta) adjustMood(mood_delta);
 	if (attitude_delta) adjustAttitude(authorTag, attitude_delta);
-	if (memory_ops.length) applyMemoryOps(memory_ops);
 	messages.push({ role: 'assistant', content: answer });
 	return answer;
 }
@@ -347,7 +345,7 @@ async function handleAsk(ctx) {
 	const dotaContext = dotaContextFor(playersMap, authorTag, fromUser.id);
 
 	const messages = [
-		{ role: 'system', content: `Ты — ${persona.name}, чат-бот в группе друзей. Отвечай на любые вопросы и темы. По умолчанию отвечай на русском; если пользователь просит другой язык — отвечай на нём.
+		{ role: 'system', content: `Ты — ${persona.name}, чат-бот в группе друзей. Отвечай на любые вопросы и темы. По умолчанию отвечай на русском, если правила чата в разделе ПАМЯТЬ не задают другой язык; если пользователь просит другой язык — отвечай на нём.
 
 Вопрос задаёт: ${authorTag}. Ты и автор вопроса — разные люди, не говори о его играх и делах от первого лица.
 
@@ -442,6 +440,7 @@ function getDebugInfo() {
 		``,
 		`Mood: ${debug.mood}/100 (${moodLabel})`,
 		`Active reply chains: ${askChatHistory.size}`,
+		`Память: правил ${debug.rules}, фактов ${debug.facts}`,
 		`Model (ответы): ${GPT_MODEL}`,
 		`Model (инструменты): ${TOOLS_MODEL}`,
 	];

@@ -57,29 +57,9 @@ function parseAskResponse(raw) {
 			answer: parsed.answer || raw,
 			mood_delta: clampDelta(parsed.mood_delta),
 			attitude_delta: clampDelta(parsed.attitude_delta),
-			memory_ops: Array.isArray(parsed.memory_ops) ? parsed.memory_ops : [],
 		};
 	} catch {
-		return { answer: raw, mood_delta: 0, attitude_delta: 0, memory_ops: [] };
-	}
-}
-
-function applyMemoryOps(ops) {
-	for (const op of ops) {
-		try {
-			if (op.action === 'save') {
-				memory.addFact(op.target, op.fact);
-				console.log(`Memory save [${op.target}]: ${op.fact}`);
-			} else if (op.action === 'replace') {
-				memory.replaceFact(op.target, op.index, op.fact);
-				console.log(`Memory replace [${op.target}][${op.index}]: ${op.fact}`);
-			} else if (op.action === 'delete') {
-				const removed = memory.deleteFact(op.target, op.index);
-				console.log(`Memory delete [${op.target}][${op.index}]: ${removed}`);
-			}
-		} catch (err) {
-			console.error(`Memory op error:`, err.message);
-		}
+		return { answer: raw, mood_delta: 0, attitude_delta: 0 };
 	}
 }
 
@@ -118,6 +98,5 @@ module.exports = {
 	adjustAttitude,
 	clampDelta,
 	parseAskResponse,
-	applyMemoryOps,
 	getMoodPrompt,
 };

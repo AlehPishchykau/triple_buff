@@ -44,8 +44,20 @@ function writeState(data) {
 	writeJSON(statePath(), data);
 }
 
+// facts.json: { global: [entry], users: { '@tag': [entry] }, nextId }
+//   global — rules for how the bot should behave in this chat (with their scope in the text)
+//   users  — lasting facts about a person, stored under the person they are about
+// entry = { id, text, by?, ts? }. Older files hold plain strings; they get ids on first read.
 function readFacts() {
-	return readJSON(factsPath(), { global: [], users: {} });
+	const raw = readJSON(factsPath(), { global: [], users: {} });
+	const all = [...(raw.global || []), ...Object.values(raw.users || {}).flat()];
+	const maxId = all.reduce((max, e) => Math.max(max, Number(String(e?.id || '').replace(/\D/g, '')) || 0), 0);
+	let nextId = Math.max(raw.nextId || 1, maxId + 1);
+	const entry = e => typeof e === 'string' ? { id: `m${nextId++}`, text: e } : e;
+	const facts = { global: (raw.global || []).map(entry), users: {} };
+	for (const [user, list] of Object.entries(raw.users || {})) facts.users[user] = list.map(entry);
+	facts.nextId = nextId;
+	return facts;
 }
 
 function writeFacts(data) {
@@ -85,51 +97,78 @@ function setVoiceTranscribe(enabled) {
 	return enabled;
 }
 
-function addFact(target, fact) {
-	const f = readFacts();
-	if (target === 'global') {
-		f.global.push(fact);
-	} else {
-		if (!f.users[target]) f.users[target] = [];
-		f.users[target].push(fact);
-	}
-	writeFacts(f);
+const MAX_RULES = 30;
+const MAX_FACTS_PER_USER = 30;
+
+function sameText(a, b) {
+	const norm = t => String(t).toLowerCase().replace(/[^a-zа-яё0-9]/gi, '');
+	return norm(a) === norm(b);
 }
 
-function replaceFact(target, index, fact) {
-	const f = readFacts();
-	const arr = target === 'global' ? f.global : f.users[target];
-	if (arr && index >= 0 && index < arr.length) {
-		arr[index] = fact;
-		writeFacts(f);
-		return true;
-	}
-	return false;
+function listOf(facts, target) {
+	return target === 'global' ? facts.global : facts.users[target];
 }
 
-function deleteFact(target, index) {
-	const f = readFacts();
-	const arr = target === 'global' ? f.global : f.users[target];
-	if (arr && index >= 0 && index < arr.length) {
-		const removed = arr.splice(index, 1)[0];
-		writeFacts(f);
-		return removed;
+function locate(facts, id) {
+	for (const target of ['global', ...Object.keys(facts.users)]) {
+		const index = listOf(facts, target).findIndex(e => e.id === id);
+		if (index >= 0) return { target, list: listOf(facts, target), index };
 	}
 	return null;
 }
 
-function getMemorySummary(username) {
+// Returns the stored entry, or null when it is a duplicate or the list is full.
+function addFact(target, text, meta = {}) {
 	const f = readFacts();
+	if (target !== 'global' && !f.users[target]) f.users[target] = [];
+	const list = listOf(f, target);
+	if (list.some(e => sameText(e.text, text))) return null;
+	if (list.length >= (target === 'global' ? MAX_RULES : MAX_FACTS_PER_USER)) return null;
+	const entry = { id: `m${f.nextId++}`, text, ...meta, ts: Math.floor(Date.now() / 1000) };
+	list.push(entry);
+	writeFacts(f);
+	return entry;
+}
+
+function updateFact(id, text, meta = {}) {
+	const f = readFacts();
+	const found = locate(f, id);
+	if (!found) return false;
+	found.list[found.index] = { ...found.list[found.index], text, ...meta, ts: Math.floor(Date.now() / 1000) };
+	writeFacts(f);
+	return true;
+}
+
+// Returns the removed text, or null when there is no such entry.
+function deleteFact(id) {
+	const f = readFacts();
+	const found = locate(f, id);
+	if (!found) return null;
+	const [removed] = found.list.splice(found.index, 1);
+	writeFacts(f);
+	return removed.text;
+}
+
+function getFactTargets() {
+	return Object.keys(readFacts().users);
+}
+
+// Memory as shown to the models. `withIds` is for the memory keeper, which edits entries by id.
+function getMemorySummary(username, { withIds = false, rules = true } = {}) {
+	const f = readFacts();
+	const line = e => `  ${withIds ? `[${e.id}] ` : '- '}${e.text}`;
 	const lines = [];
-	if (f.global.length) {
-		lines.push('Общие факты:');
-		f.global.forEach((fact, i) => lines.push(`  [${i}] ${fact}`));
+	if (rules && f.global.length) {
+		lines.push('ПРАВИЛА ЧАТА (соблюдай всегда; область действия указана в самом правиле):');
+		f.global.forEach(e => lines.push(line(e)));
 	}
-	for (const [user, facts] of Object.entries(f.users)) {
-		if (!facts.length) continue;
-		const isCurrent = user === username;
-		lines.push(`${user}${isCurrent ? ' (собеседник)' : ''}:`);
-		facts.forEach((fact, i) => lines.push(`  [${i}] ${fact}`));
+	const people = Object.entries(f.users).filter(([, facts]) => facts.length);
+	if (people.length) {
+		lines.push('ФАКТЫ О ЛЮДЯХ (используй к месту, не пересказывай):');
+		for (const [user, facts] of people) {
+			lines.push(`${user}${user === username ? ' (собеседник)' : ''}:`);
+			facts.forEach(e => lines.push(line(e)));
+		}
 	}
 	return lines.join('\n') || null;
 }
@@ -190,13 +229,13 @@ function savePhoto(filename, buffer) {
 function getDebugData() {
 	const s = readState();
 	const f = readFacts();
-	return { mood: s.mood, attitudes: s.attitudes, globalFacts: f.global, userFacts: f.users };
+	return { mood: s.mood, attitudes: s.attitudes, rules: f.global.length, facts: Object.values(f.users).flat().length };
 }
 
 module.exports = {
 	getMood, setMood,
 	getAttitude, setAttitude,
-	addFact, replaceFact, deleteFact,
+	addFact, updateFact, deleteFact, getFactTargets,
 	getMemorySummary, getDebugData, savePhoto,
 	saveChatMessage, getChatMessages,
 	getVoiceTranscribe, setVoiceTranscribe,

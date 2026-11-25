@@ -66,40 +66,72 @@ describe('memory', () => {
 	});
 
 	describe('facts', () => {
-		it('adds global fact', () => {
+		it('adds a rule to global and shows it in the rules section', () => {
 			withinChat(() => {
-				memory.addFact('global', 'test fact');
+				const entry = memory.addFact('global', 'Всегда отвечать коротко', { by: '@alice' });
+				assert.ok(entry.id);
+				assert.equal(entry.by, '@alice');
 				const summary = memory.getMemorySummary();
-				assert.ok(summary.includes('test fact'));
+				assert.ok(summary.includes('ПРАВИЛА ЧАТА'));
+				assert.ok(summary.includes('- Всегда отвечать коротко'));
 			});
 		});
 
-		it('adds user fact', () => {
+		it('adds a user fact and marks the interlocutor', () => {
 			withinChat(() => {
 				memory.addFact('@alice', 'likes cats');
 				const summary = memory.getMemorySummary('@alice');
+				assert.ok(summary.includes('ФАКТЫ О ЛЮДЯХ'));
+				assert.ok(summary.includes('@alice (собеседник):'));
 				assert.ok(summary.includes('likes cats'));
-				assert.ok(summary.includes('собеседник'));
+				assert.deepEqual(memory.getFactTargets(), ['@alice']);
 			});
 		});
 
-		it('replaces fact', () => {
+		it('refuses duplicates that differ only in case or punctuation', () => {
 			withinChat(() => {
-				memory.addFact('global', 'old fact');
-				memory.replaceFact('global', 0, 'new fact');
-				const summary = memory.getMemorySummary();
-				assert.ok(!summary.includes('old fact'));
-				assert.ok(summary.includes('new fact'));
+				assert.ok(memory.addFact('@alice', 'Ездит на мопеде'));
+				assert.equal(memory.addFact('@alice', 'ездит на мопеде.'), null);
+				assert.ok(memory.addFact('@bob', 'Ездит на мопеде'));
 			});
 		});
 
-		it('deletes fact', () => {
+		it('updates and deletes by stable id', () => {
 			withinChat(() => {
-				memory.addFact('global', 'to delete');
-				const removed = memory.deleteFact('global', 0);
-				assert.equal(removed, 'to delete');
-				const summary = memory.getMemorySummary();
-				assert.equal(summary, null);
+				const a = memory.addFact('global', 'first');
+				const b = memory.addFact('global', 'second');
+				assert.equal(memory.deleteFact(a.id), 'first');
+				assert.equal(memory.updateFact(b.id, 'second, updated'), true);
+				const summary = memory.getMemorySummary(null, { withIds: true });
+				assert.ok(summary.includes(`[${b.id}] second, updated`));
+				assert.ok(!summary.includes('first'));
+				assert.equal(memory.deleteFact('nope'), null);
+				assert.equal(memory.updateFact('nope', 'x'), false);
+			});
+		});
+
+		it('reads the old plain-string format and keeps ids stable across writes', () => {
+			withinChat(() => {
+				const file = path.join(TEST_DIR, CHAT_ID, 'billy', 'facts.json');
+				fs.writeFileSync(file, JSON.stringify({ global: ['old rule'], users: { '@alice': ['old fact'] } }));
+				const before = memory.getMemorySummary(null, { withIds: true });
+				assert.ok(before.includes('[m1] old rule'));
+				assert.ok(before.includes('[m2] old fact'));
+				const added = memory.addFact('@alice', 'new fact');
+				assert.equal(added.id, 'm3');
+				const stored = JSON.parse(fs.readFileSync(file, 'utf8'));
+				assert.deepEqual(stored.global[0], { id: 'm1', text: 'old rule' });
+				assert.equal(memory.deleteFact('m2'), 'old fact');
+			});
+		});
+
+		it('can leave rules out of the summary', () => {
+			withinChat(() => {
+				memory.addFact('global', 'a rule');
+				memory.addFact('@alice', 'a fact');
+				const summary = memory.getMemorySummary(null, { rules: false });
+				assert.ok(!summary.includes('a rule'));
+				assert.ok(summary.includes('a fact'));
 			});
 		});
 

@@ -66,13 +66,11 @@ describe('parseAskResponse', () => {
 			answer: 'hello',
 			mood_delta: 2,
 			attitude_delta: -1,
-			memory_ops: [{ action: 'save', target: 'global', fact: 'test' }],
 		});
 		const result = parseAskResponse(raw);
 		assert.equal(result.answer, 'hello');
 		assert.equal(result.mood_delta, 2);
 		assert.equal(result.attitude_delta, -1);
-		assert.equal(result.memory_ops.length, 1);
 	});
 
 	it('falls back to raw text on invalid JSON', () => {
@@ -80,7 +78,6 @@ describe('parseAskResponse', () => {
 		assert.equal(result.answer, 'just plain text');
 		assert.equal(result.mood_delta, 0);
 		assert.equal(result.attitude_delta, 0);
-		assert.deepEqual(result.memory_ops, []);
 	});
 
 	it('uses raw text when answer is missing', () => {
@@ -94,17 +91,5 @@ describe('parseAskResponse', () => {
 		const result = parseAskResponse(raw);
 		assert.equal(result.mood_delta, 5);
 		assert.equal(result.attitude_delta, -5);
-	});
-
-	it('handles missing memory_ops', () => {
-		const raw = JSON.stringify({ answer: 'x' });
-		const result = parseAskResponse(raw);
-		assert.deepEqual(result.memory_ops, []);
-	});
-
-	it('handles non-array memory_ops', () => {
-		const raw = JSON.stringify({ answer: 'x', memory_ops: 'invalid' });
-		const result = parseAskResponse(raw);
-		assert.deepEqual(result.memory_ops, []);
 	});
 });
