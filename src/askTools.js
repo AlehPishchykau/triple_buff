@@ -2,7 +2,6 @@ const persona = require('./persona');
 const {
 	fetchPlayerMatchesStats,
 	fetchPlayerHeroesStats,
-	fetchRecentMatches,
 	fetchMatchDetail,
 	fetchPeers,
 	fetchPlayerTotals,
@@ -13,11 +12,12 @@ const memory = require('./memory');
 const players = require('./players');
 const {
 	resolveHero, resolvePlayerId, playerLabel, buildMatchView, buildPlayerMatchRow, summarizeMatches,
-	averagesFromTotals, buildHeroPool, heroRow, formatDate, matchUrl, playerWon,
+	averagesFromTotals, buildHeroPool, heroRow, formatDate, localDay, matchUrl, playerWon,
 } = require('./dotaAnalysis');
 const { GPT_MODEL_MINI } = process.env;
 
 const PLAYER_ID = { type: 'string', description: 'player_id из списка игроков (или любой числовой Steam account_id)' };
+const DATE = { type: 'string', description: 'Календарный день YYYY-MM-DD (Europe/Vilnius). Используй для "сегодня", "вчера" и конкретных дат вместо days.' };
 const HERO = { type: 'string', description: 'Официальное английское имя героя, например "Weaver", "Phantom Assassin"' };
 
 const DOTA_TOOLS = [
@@ -39,8 +39,9 @@ const DOTA_TOOLS = [
 				properties: {
 					player_id: PLAYER_ID,
 					hero: HERO,
-					days: { type: 'number', description: 'Только матчи за последние N дней (1 = сутки, 7 = неделя)' },
-					count: { type: 'number', description: 'Сколько матчей вернуть (по умолчанию 10, максимум 30)' },
+					days: { type: 'number', description: 'Скользящий период: матчи за последние N дней (7 = неделя, 30 = месяц)' },
+					date: DATE,
+					count: { type: 'number', description: 'Сколько матчей показать (по умолчанию 10, максимум 30). Сводка summary при days/date считается по всем матчам периода.' },
 				},
 				required: ['player_id']
 			}
@@ -78,8 +79,9 @@ const DOTA_TOOLS = [
 			parameters: {
 				type: 'object',
 				properties: {
-					days: { type: 'number', description: 'Только матчи за последние N дней' },
-					count: { type: 'number', description: 'Сколько матчей вернуть (по умолчанию 10, максимум 25)' },
+					days: { type: 'number', description: 'Скользящий период: матчи за последние N дней (7 = неделя)' },
+					date: DATE,
+					count: { type: 'number', description: 'Сколько матчей показать (по умолчанию 10, максимум 25)' },
 				},
 			}
 		}
@@ -151,13 +153,32 @@ async function matchView(match, heroes, playersMap) {
 	return buildMatchView(match, { heroes, items: await storage.getItems(), playersMap });
 }
 
-// Recent turbo games of every tracked player merged into unique matches, newest first.
-async function collectGroupMatches(heroes, playersMap) {
+const UNAVAILABLE = 'OpenDota не отдал данные';
+
+// Turns { days, date } into a fetch window (OpenDota only knows rolling days) and a row filter.
+function periodOf(args) {
+	if (/^\d{4}-\d{2}-\d{2}$/.test(args.date || '')) {
+		const daysBack = Math.max(1, Math.ceil((Date.now() - Date.parse(`${args.date}T00:00:00Z`)) / 86400000) + 1);
+		return { fetchDays: daysBack, keep: m => localDay(m.start_time) === args.date, label: { date: args.date } };
+	}
+	if (args.days > 0) {
+		const cutoff = Math.floor(Date.now() / 1000) - args.days * 86400;
+		return { fetchDays: Math.ceil(args.days), keep: m => m.start_time >= cutoff, label: { period_days: args.days } };
+	}
+	return { fetchDays: null, keep: () => true, label: {} };
+}
+
+// Turbo games of every tracked player merged into unique matches, newest first.
+// `failed` lists players whose history could not be loaded, so callers can say the picture is partial.
+async function collectGroupMatches(heroes, playersMap, period = periodOf({})) {
 	const playerIds = Object.keys(playersMap);
-	const lists = await Promise.all(playerIds.map(id => fetchRecentMatches(id, 20).catch(() => [])));
+	const failed = [];
+	const lists = await Promise.all(playerIds.map(id =>
+		fetchPlayerMatches(id, period.fetchDays ? { days: period.fetchDays, limit: 200 } : { limit: 20 })
+			.catch(() => { failed.push(nameOf(playersMap, id)); return []; })));
 	const byMatch = new Map();
 	lists.forEach((matches, idx) => {
-		for (const m of matches) {
+		for (const m of matches.filter(period.keep)) {
 			if (!byMatch.has(m.match_id)) byMatch.set(m.match_id, { match_id: m.match_id, start_time: m.start_time, duration: m.duration, players: [] });
 			byMatch.get(m.match_id).players.push({
 				name: nameOf(playersMap, playerIds[idx]),
@@ -167,7 +188,11 @@ async function collectGroupMatches(heroes, playersMap) {
 			});
 		}
 	});
-	return [...byMatch.values()].sort((a, b) => b.start_time - a.start_time);
+	return { matches: [...byMatch.values()].sort((a, b) => b.start_time - a.start_time), failed };
+}
+
+function incompleteNote(failed) {
+	return failed.length ? { incomplete: `${UNAVAILABLE} по игрокам: ${failed.join(', ')}. Картина неполная.` } : {};
 }
 
 // Wraps a handler so args.player_id is always a numeric id (or the call fails with a hint).
@@ -186,25 +211,33 @@ function withPlayer(handler, { optional = false } = {}) {
 const ASK_TOOL_HANDLERS = {
 	get_player_profile: async (args, heroes, playersMap) => {
 		const id = args.player_id;
+		const player = nameOf(playersMap, id);
+		// Sections load independently: one failed endpoint must not hide the rest.
+		const unavailable = [];
+		const load = (label, promise) => promise.catch(() => { unavailable.push(label); return null; });
 		const [wl, totals30, totalsAll, heroStats, recent] = await Promise.all([
-			fetchPlayerMatchesStats(id),
-			fetchPlayerTotals(id, 30),
-			fetchPlayerTotals(id),
-			fetchPlayerHeroesStats(id),
-			fetchPlayerMatches(id, { limit: 20 }),
+			load('winrate', fetchPlayerMatchesStats(id)),
+			load('averages_last_30_days', fetchPlayerTotals(id, 30)),
+			load('averages_all_time', fetchPlayerTotals(id)),
+			load('hero_pool', fetchPlayerHeroesStats(id)),
+			load('recent games', fetchPlayerMatches(id, { limit: 20 })),
 		]);
-		if (!wl.allTime.matchCount) return { player: nameOf(playersMap, id), error: 'Нет турбо-матчей или профиль закрыт' };
+		if (unavailable.length === 5) return { player, error: UNAVAILABLE };
+		if (wl && !wl.allTime.matchCount) return { player, error: 'Нет турбо-матчей или профиль закрыт' };
 		return {
-			player: nameOf(playersMap, id),
-			winrate: {
+			player,
+			...(unavailable.length ? { unavailable: `${UNAVAILABLE}: ${unavailable.join(', ')}` } : {}),
+			...(wl ? { winrate: {
 				all_time: { games: wl.allTime.matchCount, wins: wl.allTime.winCount, winrate_pct: pct(wl.allTime.winCount, wl.allTime.matchCount) },
 				last_30_days: { games: wl.oneMonth.matchCount, wins: wl.oneMonth.winCount, winrate_pct: pct(wl.oneMonth.winCount, wl.oneMonth.matchCount) },
-			},
-			averages_last_30_days: averagesFromTotals(totals30),
-			averages_all_time: averagesFromTotals(totalsAll),
-			last_20_games: summarizeMatches(recent),
-			last_5_games: recent.slice(0, 5).map(m => buildPlayerMatchRow(m, heroes)),
-			hero_pool: buildHeroPool(heroStats, heroes, { top: 8, edge: 4 }),
+			} } : {}),
+			...(totals30 ? { averages_last_30_days: averagesFromTotals(totals30) } : {}),
+			...(totalsAll ? { averages_all_time: averagesFromTotals(totalsAll) } : {}),
+			...(recent ? {
+				last_20_games: summarizeMatches(recent),
+				last_5_games: recent.slice(0, 5).map(m => buildPlayerMatchRow(m, heroes)),
+			} : {}),
+			...(heroStats ? { hero_pool: buildHeroPool(heroStats, heroes, { top: 8, edge: 4 }) } : {}),
 		};
 	},
 	get_player_matches: async (args, heroes, playersMap) => {
@@ -215,17 +248,26 @@ const ASK_TOOL_HANDLERS = {
 			if (!hero) return { player, error: `Герой "${args.hero}" не найден — передай официальное английское имя` };
 		}
 		const count = Math.min(Math.max(args.count || 10, 1), 30);
-		const matches = await fetchPlayerMatches(args.player_id, { heroId: hero?.id, days: args.days, limit: count });
+		const period = periodOf(args);
+		// With a period the summary must cover every game in it, not just the rows shown.
+		const fetched = await fetchPlayerMatches(args.player_id, {
+			heroId: hero?.id,
+			days: period.fetchDays,
+			limit: period.fetchDays ? 500 : count,
+		});
+		const matches = fetched.filter(period.keep);
+		const scope = { ...(hero ? { hero: hero.displayName } : {}), ...period.label };
 		if (!matches.length) {
-			return { player, ...(hero ? { hero: hero.displayName } : {}), match_count: 0, note: 'Матчей по этому фильтру нет (или профиль закрыт). Не придумывай — скажи, что игр не найдено.' };
+			return { player, ...scope, match_count: 0, note: 'Матчей по этому фильтру нет (или профиль закрыт). Не придумывай — скажи, что игр не найдено.' };
 		}
 		return {
 			player,
-			...(hero ? { hero: hero.displayName } : {}),
-			...(args.days ? { period_days: args.days } : {}),
+			...scope,
 			match_count: matches.length,
 			summary: summarizeMatches(matches),
-			matches: matches.map(m => buildPlayerMatchRow(m, heroes)),
+			summary_covers: period.fetchDays ? `все ${matches.length} игр за период` : `последние ${matches.length} игр`,
+			showing: Math.min(count, matches.length),
+			matches: matches.slice(0, count).map(m => buildPlayerMatchRow(m, heroes)),
 			hint: 'Это только строки статистики игрока. Чтобы оценить конкретную игру (роль, вклад, предметы, сравнение с командой и врагами) — вызови get_match_details по её match_id.',
 		};
 	},
@@ -249,25 +291,28 @@ const ASK_TOOL_HANDLERS = {
 		return matchView(match, heroes, playersMap);
 	},
 	get_last_group_match: async (_args, heroes, playersMap) => {
-		const groupMatches = await collectGroupMatches(heroes, playersMap);
-		if (!groupMatches.length) return { error: 'Недавних матчей не найдено' };
+		const { matches: groupMatches, failed } = await collectGroupMatches(heroes, playersMap);
+		if (!groupMatches.length) return { error: failed.length ? UNAVAILABLE : 'Недавних матчей не найдено' };
 		const match = await fetchMatchDetail(groupMatches[0].match_id);
 		if (!match?.players?.length) return { error: 'Детали матча недоступны', ...groupMatches[0] };
-		return matchView(match, heroes, playersMap);
+		return { ...await matchView(match, heroes, playersMap), ...incompleteNote(failed) };
 	},
 	get_group_matches: async (args, heroes, playersMap) => {
-		let groupMatches = await collectGroupMatches(heroes, playersMap);
-		if (args.days) {
-			const cutoff = Math.floor(Date.now() / 1000) - args.days * 86400;
-			groupMatches = groupMatches.filter(m => m.start_time >= cutoff);
-		}
+		const period = periodOf(args);
+		const { matches: groupMatches, failed } = await collectGroupMatches(heroes, playersMap, period);
 		const count = Math.min(Math.max(args.count || 10, 1), 25);
-		if (!groupMatches.length) return { match_count: 0, note: 'Матчей за этот период нет. Не придумывай.' };
+		if (!groupMatches.length) {
+			return failed.length
+				? { error: UNAVAILABLE, ...incompleteNote(failed) }
+				: { ...period.label, match_count: 0, note: 'Матчей за этот период нет. Не придумывай.' };
+		}
 		// Tracked players can end up on opposite teams; then the match has no single result for "us".
 		const resultOf = m => m.players.every(p => p.result === m.players[0].result) ? m.players[0].result : 'mixed';
 		const wins = groupMatches.filter(m => resultOf(m) === 'win').length;
 		const losses = groupMatches.filter(m => resultOf(m) === 'loss').length;
 		return {
+			...period.label,
+			...incompleteNote(failed),
 			match_count: groupMatches.length,
 			record: `${wins}W-${losses}L`,
 			showing: Math.min(count, groupMatches.length),
@@ -285,29 +330,37 @@ const ASK_TOOL_HANDLERS = {
 		};
 	},
 	compare_players: async (args, _heroes, playersMap) => {
-		const days = Math.min(Math.max(args.days || 30, 1), 365);
+		const days = Math.min(Math.max(Math.ceil(args.days || 30), 1), 365);
 		const ids = Object.keys(playersMap);
+		const failed = [];
 		const rows = await Promise.all(ids.map(async (id) => {
+			const player = nameOf(playersMap, id);
 			const [matches, wl] = await Promise.all([
-				fetchPlayerMatches(id, { days, limit: 500 }).catch(() => []),
+				fetchPlayerMatches(id, { days, limit: 500 }).catch(() => null),
 				fetchPlayerMatchesStats(id).catch(() => null),
 			]);
+			const allTime = wl ? { all_time: { games: wl.allTime.matchCount, winrate_pct: pct(wl.allTime.winCount, wl.allTime.matchCount) } } : {};
+			if (!matches) {
+				failed.push(player);
+				return { player, error: UNAVAILABLE, ...allTime };
+			}
 			return {
-				player: nameOf(playersMap, id),
+				player,
 				...summarizeMatches(matches),
 				...(matches.length ? { last_game: formatDate(matches[0].start_time) } : { note: `не играл за последние ${days} дн.` }),
-				...(wl ? { all_time: { games: wl.allTime.matchCount, winrate_pct: pct(wl.allTime.winCount, wl.allTime.matchCount) } } : {}),
+				...allTime,
 			};
 		}));
 		const active = rows.filter(r => r.games > 0);
 		const mean = (field) => active.length ? Math.round(active.reduce((a, r) => a + (r[field] || 0), 0) / active.length) : null;
 		return {
 			period_days: days,
+			...incompleteNote(failed),
 			group_average: {
 				winrate_pct: mean('winrate_pct'), avg_gpm: mean('avg_gpm'),
 				avg_hero_damage: mean('avg_hero_damage'), avg_tower_damage: mean('avg_tower_damage'),
 			},
-			players: rows.sort((a, b) => (b.winrate_pct || 0) - (a.winrate_pct || 0) || b.games - a.games),
+			players: rows.sort((a, b) => (b.winrate_pct || 0) - (a.winrate_pct || 0) || (b.games || 0) - (a.games || 0)),
 			note: 'Меньше 10 игр за период — выборка слабая, выводы осторожные.',
 		};
 	},
@@ -322,7 +375,8 @@ const ASK_TOOL_HANDLERS = {
 				.sort((a, b) => b.games - a.games);
 			return { period_days: 30, player: nameOf(playersMap, args.player_id), pairs };
 		}
-		const lists = await Promise.all(trackedIds.map(id => fetchPeers(id, 30).catch(() => [])));
+		const failed = [];
+		const lists = await Promise.all(trackedIds.map(id => fetchPeers(id, 30).catch(() => { failed.push(nameOf(playersMap, id)); return []; })));
 		const byPair = new Map();
 		lists.forEach((peers, idx) => {
 			for (const p of peers) {
@@ -335,7 +389,7 @@ const ASK_TOOL_HANDLERS = {
 		const pairs = [...byPair.entries()]
 			.map(([key, v]) => row(...key.split(':'), v.games, v.wins))
 			.sort((a, b) => b.games - a.games);
-		return { period_days: 30, pairs, note: 'Пары с малым числом игр (<5) не показательны.' };
+		return { period_days: 30, ...incompleteNote(failed), pairs, note: 'Пары с малым числом игр (<5) не показательны.' };
 	},
 	web_search: async (args) => {
 		try {

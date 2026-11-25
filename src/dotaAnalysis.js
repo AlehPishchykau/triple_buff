@@ -14,6 +14,17 @@ function formatDate(unixSeconds) {
 	});
 }
 
+// Calendar day (YYYY-MM-DD) of a timestamp in the chat's timezone.
+function localDay(unixSeconds) {
+	return new Date(unixSeconds * 1000).toLocaleDateString('sv-SE', { timeZone: TZ });
+}
+
+const GAME_MODES = { 1: 'all pick', 2: 'captains mode', 3: 'random draft', 4: 'single draft', 5: 'all random', 18: 'ability draft', 22: 'all pick (ranked/unranked)', 23: 'turbo' };
+
+function gameModeName(mode) {
+	return GAME_MODES[mode] || `game_mode ${mode}`;
+}
+
 function normalize(text) {
 	return String(text || '').toLowerCase().replace(/[^a-z0-9а-яё]/gi, '');
 }
@@ -159,6 +170,7 @@ function buildMatchView(match, { heroes = {}, items = {}, playersMap = {} } = {}
 		url: matchUrl(match.match_id),
 		date: formatDate(match.start_time),
 		duration_min: Math.round(match.duration / 60),
+		mode: gameModeName(match.game_mode),
 		winner,
 		score: { radiant: match.radiant_score ?? totals.radiant.kills, dire: match.dire_score ?? totals.dire.kills },
 		...(ours.length ? {
@@ -282,6 +294,8 @@ function buildHeroPool(heroStats, heroes = {}, { top = 15, edge = 5 } = {}) {
 module.exports = {
 	matchUrl,
 	formatDate,
+	localDay,
+	gameModeName,
 	resolveHero,
 	resolvePlayerId,
 	playerLabel,

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
 	resolveHero, resolvePlayerId, playerLabel, buildMatchView, buildPlayerMatchRow, summarizeMatches,
-	averagesFromTotals, buildHeroPool,
+	averagesFromTotals, buildHeroPool, localDay, gameModeName,
 } = require('../src/dotaAnalysis');
 
 const heroes = {
@@ -156,6 +156,20 @@ describe('dotaAnalysis', () => {
 		it('handles an empty list', () => {
 			assert.deepEqual(summarizeMatches([]), { games: 0 });
 		});
+	});
+
+	it('localDay uses the chat timezone, not UTC', () => {
+		// 2026-11-24 22:30 UTC is already 25 Nov 00:30 in Vilnius (UTC+2 in winter)
+		assert.equal(localDay(Date.UTC(2026, 10, 24, 22, 30) / 1000), '2026-11-25');
+		assert.equal(localDay(Date.UTC(2026, 10, 24, 21, 30) / 1000), '2026-11-24');
+	});
+
+	it('names the game mode so non-turbo matches are not judged as turbo', () => {
+		assert.equal(gameModeName(23), 'turbo');
+		assert.equal(gameModeName(999), 'game_mode 999');
+		const m = sampleMatch();
+		m.game_mode = 23;
+		assert.equal(buildMatchView(m, { heroes, items, playersMap }).mode, 'turbo');
 	});
 
 	it('buildPlayerMatchRow keeps id, link, hero and result', () => {

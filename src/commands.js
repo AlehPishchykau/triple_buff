@@ -1,5 +1,6 @@
 const players = require('./players');
 const persona = require('./persona');
+const chatScope = require('./chatScope');
 const { fetchMatchesData, fetchPlayersData } = require('./requests');
 const { storage } = require('./storage');
 const { secondsToTime, sanitizeTelegramHTML } = require('./utils');
@@ -194,8 +195,13 @@ function pruneAskHistory() {
 	}
 }
 
+// Telegram message ids are unique only within a chat, and chains carry tool results.
+function chainKey(messageId) {
+	return `${chatScope.getChatId()}:${messageId}`;
+}
+
 function rememberReplyChain(messageId, messages) {
-	askChatHistory.set(messageId, { messages, ts: Date.now() });
+	askChatHistory.set(chainKey(messageId), { messages, ts: Date.now() });
 	pruneAskHistory();
 }
 
@@ -300,12 +306,14 @@ function hasDotaTools() {
 	return getPersonaTools().some(t => isDotaTool(t.function.name));
 }
 
-function dotaContextFor(playersMap, authorTag) {
+function dotaContextFor(playersMap, authorTag, authorId) {
 	if (!hasDotaTools() || !Object.keys(playersMap).length) return '';
 	return buildDotaContext({
 		playersMap,
 		telegramMap: players.getTelegramMap(),
+		registry: players.load(),
 		authorTag,
+		authorId,
 		today: new Date().toISOString().slice(0, 10),
 		challengeStyle: persona.prompts.challengeStyle,
 	});
@@ -336,7 +344,7 @@ async function handleAsk(ctx) {
 
 	const fromUser = ctx.message.from;
 	const authorTag = fromUser.username ? `@${fromUser.username}` : fromUser.first_name;
-	const dotaContext = dotaContextFor(playersMap, authorTag);
+	const dotaContext = dotaContextFor(playersMap, authorTag, fromUser.id);
 
 	const messages = [
 		{ role: 'system', content: `Ты — ${persona.name}, чат-бот в группе друзей. Отвечай на любые вопросы и темы. По умолчанию отвечай на русском; если пользователь просит другой язык — отвечай на нём.
@@ -379,7 +387,7 @@ ${getMoodPrompt(authorTag)}` },
 
 async function handleAskReply(ctx) {
 	const replyToId = ctx.message.reply_to_message?.message_id;
-	const history = askChatHistory.get(replyToId);
+	const history = askChatHistory.get(chainKey(replyToId));
 	if (!history) return false;
 
 	const messageId = ctx.message.message_id;
@@ -406,7 +414,7 @@ async function handleAskReply(ctx) {
 	const prev = compactHistory(history.messages);
 	// Chains started by a cross-bot reply have no roster yet; ordinary chains already carry it.
 	const hasRoster = prev.some(m => m.role === 'system' && typeof m.content === 'string' && m.content.includes(ROSTER_MARKER));
-	const dotaContext = hasRoster ? '' : dotaContextFor(playersMap, authorTag);
+	const dotaContext = hasRoster ? '' : dotaContextFor(playersMap, authorTag, fromUser.id);
 	const dotaHint = hasDotaTools() ? ` ${DOTA_FOLLOWUP_HINT}` : '';
 	const messages = [
 		...prev,

@@ -24,6 +24,11 @@ describe('askPrompts', () => {
 		assert.ok(describeAuthor('@stranger', playersMap, telegramMap).includes('не из списка игроков'));
 	});
 
+	it('recognises a registered author by Telegram id even without a username', () => {
+		const registry = { 200: { telegramId: 777, telegram: null, name: 'Владимир' } };
+		assert.ok(describeAuthor('Vova', playersMap, telegramMap, { authorId: 777, registry }).includes('это Владимир, player_id 200'));
+	});
+
 	it('mentions every Dota tool by name so the model knows when to use it', () => {
 		const ctx = buildDotaContext({ playersMap, telegramMap, authorTag: '@x', today: '2026-11-25' });
 		for (const name of DOTA_TOOL_NAMES) assert.ok(ctx.includes(name), `${name} missing from prompt`);

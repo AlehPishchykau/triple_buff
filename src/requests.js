@@ -86,11 +86,6 @@ async function fetchPlayerMatches(playerId, { heroId, days, limit = 20 } = {}) {
 	return matches.sort((a, b) => b.start_time - a.start_time);
 }
 
-async function fetchRecentMatches(playerId, take = 20) {
-	const matches = await openDotaGet(`/players/${playerId}/recentMatches`);
-	return matches.filter(m => isTurbo(m)).slice(0, take);
-}
-
 async function fetchMatchDetail(matchId) {
 	return openDotaGet(`/matches/${matchId}`);
 }
@@ -142,7 +137,6 @@ module.exports = {
 	fetchPlayerData,
 	fetchPlayerMatchesStats,
 	fetchPlayerHeroesStats,
-	fetchRecentMatches,
 	fetchMatchDetail,
 	fetchPeers,
 	fetchHeroes,

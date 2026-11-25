@@ -9,24 +9,28 @@ function buildRoster(playersMap, telegramMap = {}) {
 		.join('\n');
 }
 
-function describeAuthor(authorTag, playersMap, telegramMap = {}) {
-	const id = Object.keys(playersMap).find(pid => telegramMap[Number(pid)] === authorTag);
+// registry is players.json (dota id → { telegramId, telegram, name }); the numeric Telegram id
+// survives username changes and works for people without a username.
+function describeAuthor(authorTag, playersMap, telegramMap = {}, { authorId, registry = {} } = {}) {
+	const id = Object.keys(playersMap).find(pid =>
+		(authorId && registry[pid]?.telegramId === authorId) || telegramMap[Number(pid)] === authorTag);
 	if (!id) return `Вопрос задаёт: ${authorTag} (не из списка игроков).`;
 	return `Вопрос задаёт: ${authorTag} — это ${playersMap[id].name}, player_id ${id}. Его "я", "мой", "у меня" — про него самого, а не про тебя.`;
 }
 
-function buildDotaContext({ playersMap, telegramMap, authorTag, today, challengeStyle }) {
+function buildDotaContext({ playersMap, telegramMap, authorTag, authorId, registry, today, challengeStyle }) {
 	return `DOTA 2:
 Эти друзья играют в Dota 2 Turbo, у тебя есть живые данные OpenDota через функции.
 
 ${ROSTER_MARKER}:
 ${buildRoster(playersMap, telegramMap)}
-${describeAuthor(authorTag, playersMap, telegramMap)}
+${describeAuthor(authorTag, playersMap, telegramMap, { authorId, registry })}
 В чате игроков зовут по-разному: уменьшительные имена, ники, телеграм — сопоставляй с этим списком. Если имя подходит нескольким (тёзки) — различай по нику или telegram и называй так, чтобы было понятно, о ком речь. player_id в ответ не пиши.
 Сегодня ${today}.
 
 КОГДА БРАТЬ ДАННЫЕ:
 - Любой разговор про то, как играет конкретный человек, про конкретный матч, героя в чьём-то исполнении, сравнение игроков, "кто тащит", "почему слили" — сначала вызови функции, потом отвечай. Не отвечай про это по памяти и не выдавай старые цифры за ответ на новый вопрос.
+- Периоды: "сегодня", "вчера", конкретная дата → параметр date (календарный день YYYY-MM-DD); "за неделю", "за месяц", "в последнее время" → days.
 - Игрок в целом → get_player_profile. Его игры за период или на герое → get_player_matches. Цифры по герою → get_player_heroes. Конкретная игра → get_match_details. Последняя катка группы → get_last_group_match. Что наиграли за день/неделю → get_group_matches. Сравнить всех, серии, кто давно не играл → compare_players. Кто с кем играет → get_party_stats.
 - Собирай контекст в несколько шагов, сколько нужно для полноценного ответа: нашёл матч через get_player_matches или get_group_matches → возьми его match_id → get_match_details. "Последняя игра Вовы на Weaver" = get_player_matches с hero, потом get_match_details по первому матчу. Для разбора игрока полезно совместить профиль и его последние матчи.
 - Оценку конкретной игры (как сыграл, тащил или фидил, "фармил всю игру", "почему слили", кто виноват) давай только по get_match_details: в списке матчей нет предметов, долей в команде и сравнения с остальными.
@@ -35,6 +39,7 @@ ${describeAuthor(authorTag, playersMap, telegramMap)}
 
 ЧЕСТНОСТЬ:
 - Цифры, предметы, герои в матче, match_id и ссылки бери только из результатов функций. Нет в данных — так и скажи, не дорисовывай.
+- Если в данных есть incomplete или unavailable — часть данных OpenDota не отдал: скажи, что картина неполная, и не выдавай отсутствие данных за "не играл".
 - Если функция вернула error или пустой результат — данных у тебя нет. Скажи прямо, что OpenDota не отдал данные или игр не нашлось, и не оценивай игру по памяти или по догадкам.
 - Ссылка на матч — только поле url из данных (https://www.opendota.com/matches/<match_id>). Не подставляй match_id от другой игры.
 
@@ -44,7 +49,7 @@ ${describeAuthor(authorTag, playersMap, telegramMap)}
 
 const DOTA_ANALYSIS_RULES = `РАЗБОР ДОТЫ (ты отвечаешь по данным OpenDota):
 - Нужен вывод, а не пересказ таблицы: что получилось, что нет и почему. Каждую оценку подкрепи 1-2 цифрами из данных; голые цифры без вывода не перечисляй.
-- Это Turbo: золото и опыт ускорены, GPM 1000+ у кора — обычное дело. Не суди по меркам обычной доты. Опирайся на pct_vs_hero, доли внутри команды и сравнение с остальными игроками матча.
+- Обычно это Turbo: золото и опыт ускорены, GPM 1000+ у кора — обычное дело, не суди по меркам обычной доты. Если в данных матча mode не turbo — это обычная игра, там мерки обычные. В любом режиме опирайся на pct_vs_hero, доли внутри команды и сравнение с остальными игроками матча.
 - pct_vs_hero — перцентиль среди всех игроков OpenDota на этом же герое: 50 — середняк, 75+ — сильно, ниже 30 — слабо. Не путай его с долями внутри команды (*_share_pct).
 - Названия полей (pct_vs_hero, farm_rank, dmg_share_pct и т.п.) в ответ не вставляй — говори по-человечески: "лучше 72% игроков на этом герое", "треть урона команды", "главный по фарму".
 - Каждую цифру и предмет привязывай к тому игроку, у которого они в данных: перепутанные игроки хуже, чем отсутствие детали.

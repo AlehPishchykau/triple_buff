@@ -18,7 +18,8 @@ function openDotaGet(path) {
 
 	const promise = openDotaFetch(path);
 	getCache.set(path, { promise, expires: Date.now() + cacheTtl(path) });
-	promise.catch(() => getCache.delete(path));
+	// Drop a failed request, but only if a newer one has not replaced it in the meantime.
+	promise.catch(() => { if (getCache.get(path)?.promise === promise) getCache.delete(path); });
 	if (getCache.size > CACHE_MAX) getCache.delete(getCache.keys().next().value);
 	return promise;
 }
