@@ -130,10 +130,12 @@ function addFact(target, text, meta = {}) {
 	return entry;
 }
 
+// true — updated, false — no such entry, null — the text is the same as before.
 function updateFact(id, text, meta = {}) {
 	const f = readFacts();
 	const found = locate(f, id);
 	if (!found) return false;
+	if (sameText(found.list[found.index].text, text)) return null; // nothing actually changes
 	found.list[found.index] = { ...found.list[found.index], text, ...meta, ts: Math.floor(Date.now() / 1000) };
 	writeFacts(f);
 	return true;

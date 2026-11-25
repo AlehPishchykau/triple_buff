@@ -51,6 +51,7 @@ describe('memoryKeeper', () => {
 			{ op: 'update', id: rule.id, text: 'новое правило' },
 			{ op: 'delete', id: fact.id },
 			{ op: 'delete', id: 'm999' },
+			{ op: 'update', id: rule.id, text: 'Новое правило.' },
 		], { participants: people() });
 		assert.deepEqual(changes, ['обновлено: новое правило', 'удалено: есть кот']);
 		const summary = memory.getMemorySummary();
