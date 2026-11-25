@@ -58,9 +58,14 @@ describe('memoryKeeper', () => {
 		assert.ok(summary.includes('новое правило') && !summary.includes('есть кот'));
 	}));
 
-	it('caps the number of operations taken from one reply', () => inChat(() => {
+	it('caps additions from one reply but lets "forget everything" delete every entry', () => inChat(() => {
 		const ops = Array.from({ length: 9 }, (_, i) => ({ op: 'add', target: '@bob', text: `факт ${i}` }));
 		assert.equal(applyMemoryOps(ops, { participants: people() }).length, 5);
+		for (let i = 10; i < 18; i++) memory.addFact('@bob', `ещё факт ${i}`);
+		const ids = memory.getMemorySummary(null, { withIds: true }).match(/m\d+/g);
+		assert.equal(ids.length, 13);
+		assert.equal(applyMemoryOps(ids.map(id => ({ op: 'delete', id })), { participants: people() }).length, 13);
+		assert.equal(memory.getMemorySummary(), null);
 	}));
 
 	it('collects participants from players, stored facts, chat log and the author', () => inChat(() => {
@@ -69,7 +74,7 @@ describe('memoryKeeper', () => {
 		memory.saveChatMessage({ from: 'billy', name: 'Billy', text: 'yo', ts: Math.floor(Date.now() / 1000), type: 'bot' });
 		const p = knownParticipants('@eve', { 1: { name: 'Боб', nick: 'Bobster' } });
 		assert.deepEqual([...p.keys()].sort(), ['@bob', '@carol', '@dave', '@eve']);
-		assert.equal(p.get('@bob'), 'Боб, ник «Bobster»');
+		assert.equal(p.get('@bob'), 'Боб · игровой ник «Bobster»');
 		assert.equal(p.get('@dave'), 'Дэйв');
 	}));
 
@@ -90,7 +95,7 @@ describe('memoryKeeper', () => {
 		const rule = memory.addFact('global', 'правило');
 		const input = buildKeeperInput({ participants: people(), authorTag: '@bob', dialog: [], message: '[@bob]: привет' });
 		assert.ok(input.includes(`[${rule.id}] правило`));
-		assert.ok(input.includes('УЧАСТНИКИ: @Alice (Алиса), @bob (Боб)'));
+		assert.ok(input.includes('- @Alice — Алиса\n- @bob — Боб'));
 		assert.ok(input.endsWith('[@bob]: привет'));
 	}));
 
