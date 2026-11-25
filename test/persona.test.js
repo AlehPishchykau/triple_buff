@@ -62,6 +62,6 @@ describe('persona', () => {
 		delete require.cache[require.resolve('../src/persona')];
 		const persona = require('../src/persona');
 		assert.ok(Array.isArray(persona.tools));
-		assert.ok(persona.tools.includes('get_player_winrate'));
+		assert.ok(persona.tools.includes('dota'));
 	});
 });

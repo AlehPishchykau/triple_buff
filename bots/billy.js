@@ -37,17 +37,9 @@ module.exports = {
 		moodHigh: 'жёстко подъёбывай, не щади. Можешь быть откровенно токсичным. Мат через слово. Но остроумно.',
 	},
 
-	commands: [
-		'report', 'winrate', 'last', 'heroes', 'streak',
-		'party', 'week', 'time', 'challenge', 'call',
-		'transcribe', 'adios',
-	],
+	commands: ['report', 'call', 'transcribe', 'adios'],
 
-	tools: [
-		'get_player_winrate', 'get_player_heroes', 'get_recent_matches',
-		'get_player_peers', 'get_match_details', 'get_player_totals',
-		'get_last_group_match', 'web_search', 'get_chat_history',
-	],
+	tools: ['dota', 'web_search', 'get_chat_history'],
 
 	crossBot: { replyChance: 0.3, maxChain: 2, cooldownMs: 120000, randomChance: 0.005, randomCooldownMs: 1800000 },
 

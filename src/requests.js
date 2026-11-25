@@ -36,7 +36,7 @@ async function fetchPlayersData() {
 	results.forEach(player => {
 		const p = player.profile;
 		const local = localData[String(p.account_id)];
-		data[p.account_id] = { name: local?.name || p.personaname, avatar: p.avatarfull };
+		data[p.account_id] = { name: local?.name || p.personaname, nick: p.personaname, avatar: p.avatarfull };
 	});
 	return data;
 }
@@ -67,12 +67,23 @@ async function fetchPlayerHeroesStats(playerId) {
 			heroId: Number(h.hero_id),
 			matchCount: h.games,
 			winCount: h.win,
+			lastPlayed: h.last_played,
 		}));
 }
 
-async function fetchLastMatches(playerId, take = 5) {
-	const matches = await openDotaGet(`/players/${playerId}/recentMatches`);
-	return matches.filter(m => isTurbo(m)).slice(0, take);
+const PLAYER_MATCH_FIELDS = [
+	'hero_id', 'kills', 'deaths', 'assists', 'gold_per_min', 'xp_per_min', 'hero_damage',
+	'tower_damage', 'hero_healing', 'last_hits', 'level', 'start_time', 'duration', 'party_size',
+];
+
+// Turbo match history with per-match stats; unlike /recentMatches it can go past the
+// last 20 games and filter by hero or period.
+async function fetchPlayerMatches(playerId, { heroId, days, limit = 20 } = {}) {
+	const params = [TURBO_FILTER, `limit=${limit}`, ...PLAYER_MATCH_FIELDS.map(f => `project=${f}`)];
+	if (heroId) params.push(`hero_id=${heroId}`);
+	if (days) params.push(`date=${days}`);
+	const matches = await openDotaGet(`/players/${playerId}/matches?${params.join('&')}`);
+	return matches.sort((a, b) => b.start_time - a.start_time);
 }
 
 async function fetchRecentMatches(playerId, take = 20) {
@@ -82,11 +93,6 @@ async function fetchRecentMatches(playerId, take = 20) {
 
 async function fetchMatchDetail(matchId) {
 	return openDotaGet(`/matches/${matchId}`);
-}
-
-async function fetchLastMatchData(playerId) {
-	const matches = await openDotaGet(`/players/${playerId}/recentMatches`);
-	return matches.length > 0 ? matches[0] : null;
 }
 
 async function fetchPeers(playerId, days) {
@@ -103,13 +109,26 @@ async function fetchHeroes() {
 			id: hero.id,
 			displayName: hero.localized_name,
 			shortName: hero.name.replace('npc_dota_hero_', ''),
+			roles: hero.roles || [],
+			aliases: Array.isArray(hero.aliases) ? hero.aliases : [],
 		};
 	});
 	return result;
 }
 
-async function fetchPlayerTotals(playerId) {
-	return openDotaGet(`/players/${playerId}/totals?${TURBO_FILTER}`);
+// item id → display name
+async function fetchItems() {
+	const items = await openDotaGet('/constants/items');
+	const result = {};
+	Object.values(items).forEach(item => {
+		if (item.id && item.dname) result[item.id] = item.dname;
+	});
+	return result;
+}
+
+async function fetchPlayerTotals(playerId, days) {
+	const dateParam = days ? `&date=${days}` : '';
+	return openDotaGet(`/players/${playerId}/totals?${TURBO_FILTER}${dateParam}`);
 }
 
 async function fetchGameModes() {
@@ -123,12 +142,12 @@ module.exports = {
 	fetchPlayerData,
 	fetchPlayerMatchesStats,
 	fetchPlayerHeroesStats,
-	fetchLastMatches,
 	fetchRecentMatches,
 	fetchMatchDetail,
-	fetchLastMatchData,
 	fetchPeers,
 	fetchHeroes,
+	fetchItems,
+	fetchPlayerMatches,
 	fetchPlayerTotals,
 	fetchGameModes
 };

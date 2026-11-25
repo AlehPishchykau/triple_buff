@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const cron = require('node-cron');
-const { Markup, Telegraf } = require('telegraf');
+const { Telegraf } = require('telegraf');
 const { saveChatMessage, getChatMessages, getVoiceTranscribe, setVoiceTranscribe } = require('./memory');
 const voiceShare = require('./voiceShare');
 const persona = require('./persona');
@@ -13,21 +13,11 @@ const { startDecayTimer } = require('./mood');
 
 const {
 	sendReport,
-	sendPlayerWinrate,
-	sendPlayersWinrate,
-	sendLastMatchesList,
-	sendMatchDetails,
-	sendLastPlayTime,
-	sendHeroesStats,
-	sendStreaks,
-	sendPartyStats,
-	generateChallenge,
 	handleAsk,
 	handleAskReply,
 	rememberReplyChain,
 	getDebugInfo,
 	deleteMessage,
-	deleteAction,
 } = require('./commands');
 const { refreshPlayers, fetchPlayerData } = require('./requests');
 const { storage } = require('./storage');
@@ -173,58 +163,11 @@ bot.command('report', safeCommand(async (ctx) => {
 	await sendReport(ctx, period);
 }));
 
-bot.command('winrate', safeCommand(async (ctx) => {
-	await ctx.reply(
-		'Выбери период:',
-		Markup.inlineKeyboard([
-			[Markup.button.callback('За все время', 'wr_period:allTime'),
-			 Markup.button.callback('За месяц', 'wr_period:oneMonth')]
-		])
-	);
-}));
-
-bot.command('last', safeCommand(async (ctx) => {
-	const result = await sendLastMatchesList(ctx);
-	if (!result) return;
-
-	const { convertMiliseconds } = require('./utils');
-	const buttons = result.matches.map(m => {
-		const ago = convertMiliseconds(Date.now() - m.startDateTime * 1000);
-		const emoji = m.isVictory ? '✅' : '❌';
-		const label = `${emoji} ${m.playerName} — ${m.heroName} (${m.kills}/${m.deaths}/${m.assists}) ${ago}`;
-		return [Markup.button.callback(label, `match:${m.matchId}:${m.playerId}`)];
-	});
-
-	await ctx.reply(
-		'Последние матчи:',
-		Markup.inlineKeyboard(buttons)
-	);
-}));
-
-bot.command('time', safeCommand((ctx) => sendLastPlayTime(ctx)));
-bot.command('heroes', safeCommand((ctx) => sendHeroesStats(ctx)));
-bot.command('streak', safeCommand((ctx) => sendStreaks(ctx)));
-bot.command('party', safeCommand((ctx) => sendPartyStats(ctx)));
-bot.command('week', safeCommand((ctx) => sendReport(ctx, 'week')));
 
 bot.command('transcribe', safeCommand(async (ctx) => {
 	const current = getVoiceTranscribe();
 	setVoiceTranscribe(!current);
 	await ctx.replyWithHTML(`<blockquote>Транскрипция голосовых: <b>${!current ? 'включена' : 'выключена'}</b></blockquote>`);
-}));
-
-bot.command('challenge', safeCommand(async (ctx) => {
-	const playersData = await storage.getPlayers();
-	const playerButtons = Object.entries(playersData).map(([id, data]) =>
-		[Markup.button.callback(data.name, `ch:${id}`)]
-	);
-	await ctx.reply(
-		'Кому челлендж?',
-		Markup.inlineKeyboard([
-			[Markup.button.callback('🎲 Рандом', 'ch:random')],
-			...playerButtons
-		])
-	);
 }));
 
 bot.command('call', safeCommand(async (ctx) => {
@@ -447,86 +390,15 @@ bot.command('adios', async (ctx) => {
 	ctx.replyWithVoice('BQACAgIAAxkBAAIBLWWpm5CuDGxJZe5dkFhVLCK-0k8KAAKyPgACgwVJSVAsluDHpCQlNAQ');
 });
 
-bot.action(/wr_period:(.+)/, async (ctx) => {
-	try {
-		await ctx.answerCbQuery();
-		const period = ctx.match[1];
-		const playersData = await storage.getPlayers();
-		const playerButtons = Object.entries(playersData).map(([id, data]) =>
-			[Markup.button.callback(data.name, `wr_player:${period}:${id}`)]
-		);
-		const periodLabel = period === 'allTime' ? 'За все время' : 'За месяц';
-		await ctx.editMessageText(
-			`${periodLabel} — выбери игрока:`,
-			Markup.inlineKeyboard([
-				[Markup.button.callback('Все игроки', `wr_player:${period}:all`)],
-				...playerButtons
-			])
-		);
-	} catch (err) {
-		console.log('wr_period error:', err.message);
-		try { await ctx.replyWithHTML(`<blockquote>Ошибка: ${err.message}</blockquote>`); } catch (_) {}
-	}
-});
-
-bot.action(/wr_player:(.+):(.+)/, async (ctx) => {
-	try {
-		await ctx.answerCbQuery();
-		await deleteAction(ctx);
-		const period = ctx.match[1];
-		const playerId = ctx.match[2];
-		if (playerId === 'all') {
-			await sendPlayersWinrate(ctx, period);
-		} else {
-			await sendPlayerWinrate(ctx, playerId, period);
-		}
-	} catch (err) {
-		console.log('wr_player error:', err.message);
-		try { await ctx.replyWithHTML(`<blockquote>Ошибка: ${err.message}</blockquote>`); } catch (_) {}
-	}
-});
-
-bot.action(/match:(\d+):(\d+)/, async (ctx) => {
-	try {
-		await ctx.answerCbQuery();
-		await deleteAction(ctx);
-		const matchId = ctx.match[1];
-		const playerId = ctx.match[2];
-		await sendMatchDetails(ctx, matchId, playerId);
-	} catch (err) {
-		console.log('match error:', err.message);
-		try { await ctx.replyWithHTML(`<blockquote>Ошибка: ${err.message}</blockquote>`); } catch (_) {}
-	}
-});
-
-bot.action(/ch:(.+)/, async (ctx) => {
-	try {
-		await ctx.answerCbQuery();
-		await deleteAction(ctx);
-		await generateChallenge(ctx, ctx.match[1]);
-	} catch (err) {
-		console.log('challenge error:', err.message);
-		try { await ctx.replyWithHTML(`<blockquote>Ошибка: ${err.message}</blockquote>`); } catch (_) {}
-	}
-});
-
 const COMMAND_DESCRIPTIONS = {
 	report: 'Отчёт по матчам (/report или /report week)',
-	winrate: 'Винрейт в турбо',
-	last: 'Последний матч',
-	heroes: 'Топ-3 героев',
-	streak: 'Серии побед/поражений',
-	party: 'Совместные игры',
-	week: 'Недельный отчёт',
-	time: 'Время без Dota 2',
-	challenge: 'Рандомный челлендж',
 	call: 'Позвать всех',
 	transcribe: 'Вкл/выкл транскрипцию голосовых',
 };
 
 const botCommands = [
 	{ command: 'ask', description: 'Задать вопрос ИИ (/ask вопрос)' },
-	{ command: persona.command, description: `Спросить ${persona.name} (/${persona.command} вопрос)` },
+	{ command: persona.command, description: `Спросить ${persona.name}: игроки, матчи, герои, что угодно (/${persona.command} вопрос)` },
 	{ command: 'register', description: 'Привязать Dota аккаунт (/register <dota_id>)' },
 	{ command: 'unregister', description: 'Отвязать Dota аккаунт' },
 ];

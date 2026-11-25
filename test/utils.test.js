@@ -130,3 +130,40 @@ describe('sanitizeTelegramHTML', () => {
 		assert.equal(sanitizeTelegramHTML('<b><i>bold italic</i></b>'), '<b><i>bold italic</i></b>');
 	});
 });
+
+describe('openDotaGet cache', () => {
+	const { openDotaGet, clearOpenDotaCache } = require('../src/utils');
+	const realFetch = global.fetch;
+	let calls;
+
+	const stubFetch = (handler) => {
+		calls = [];
+		global.fetch = async (url) => { calls.push(url); return handler(url); };
+	};
+	const ok = (body) => ({ ok: true, status: 200, json: async () => body, headers: { get: () => null } });
+
+	it('serves repeated and concurrent GETs from one request', async () => {
+		clearOpenDotaCache();
+		stubFetch(() => ok({ v: 1 }));
+		try {
+			const [a, b] = await Promise.all([openDotaGet('/players/1/wl'), openDotaGet('/players/1/wl')]);
+			const c = await openDotaGet('/players/1/wl');
+			assert.deepEqual([a, b, c], [{ v: 1 }, { v: 1 }, { v: 1 }]);
+			assert.equal(calls.length, 1);
+			await openDotaGet('/players/2/wl');
+			assert.equal(calls.length, 2);
+		} finally { global.fetch = realFetch; }
+	});
+
+	it('does not cache failures', async () => {
+		clearOpenDotaCache();
+		let fail = true;
+		stubFetch(() => fail ? { ok: false, status: 500, statusText: 'Server Error', headers: { get: () => null } } : ok({ v: 2 }));
+		try {
+			await assert.rejects(() => openDotaGet('/matches/1'), /OpenDota: 500/);
+			fail = false;
+			assert.deepEqual(await openDotaGet('/matches/1'), { v: 2 });
+			assert.equal(calls.length, 2);
+		} finally { global.fetch = realFetch; }
+	});
+});

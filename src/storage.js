@@ -1,9 +1,10 @@
-const { fetchPlayersData, fetchPlayerData, fetchHeroes, fetchGameModes } = require("./requests");
+const { fetchPlayersData, fetchPlayerData, fetchHeroes, fetchItems, fetchGameModes } = require("./requests");
 const chatScope = require("./chatScope");
 
 class Storage {
 	_players = new Map();
 	heroes = null;
+	items = null;
 	gameModes = null;
 
 	async getPlayers(force = false) {
@@ -34,6 +35,13 @@ class Storage {
 			this.heroes = await fetchHeroes();
 		}
 		return this.heroes;
+	}
+
+	async getItems(force = false) {
+		if (!this.items || force) {
+			this.items = await fetchItems();
+		}
+		return this.items;
 	}
 
 	async getGameModes(force = false) {

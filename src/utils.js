@@ -1,12 +1,39 @@
 const OPENDOTA_API_URL = 'https://api.opendota.com/api';
 
-async function openDotaGet(path, retries = 2) {
+// OpenDota allows 60 requests a minute per IP, shared by every bot on the box. A deep
+// question can hit the same endpoint several times, so identical GETs are served from a
+// short-lived cache; finished matches and constants never change and live longer.
+const CACHE_TTL_MS = 2 * 60 * 1000;
+const CACHE_TTL_STATIC_MS = 30 * 60 * 1000;
+const CACHE_MAX = 300;
+const getCache = new Map();
+
+function cacheTtl(path) {
+	return /^\/(matches|constants)\//.test(path) ? CACHE_TTL_STATIC_MS : CACHE_TTL_MS;
+}
+
+function openDotaGet(path) {
+	const hit = getCache.get(path);
+	if (hit && hit.expires > Date.now()) return hit.promise;
+
+	const promise = openDotaFetch(path);
+	getCache.set(path, { promise, expires: Date.now() + cacheTtl(path) });
+	promise.catch(() => getCache.delete(path));
+	if (getCache.size > CACHE_MAX) getCache.delete(getCache.keys().next().value);
+	return promise;
+}
+
+function clearOpenDotaCache() {
+	getCache.clear();
+}
+
+async function openDotaFetch(path, retries = 2) {
 	const response = await fetch(`${OPENDOTA_API_URL}${path}`);
 
 	if (response.status === 429 && retries > 0) {
 		const delay = parseInt(response.headers.get('retry-after') || '5', 10) * 1000;
 		await new Promise(r => setTimeout(r, delay));
-		return openDotaGet(path, retries - 1);
+		return openDotaFetch(path, retries - 1);
 	}
 
 	if (!response.ok) {
@@ -18,6 +45,7 @@ async function openDotaGet(path, retries = 2) {
 
 async function openDotaPost(path) {
 	await fetch(`${OPENDOTA_API_URL}${path}`, { method: 'POST' }).catch(() => {});
+	clearOpenDotaCache();
 }
 
 function isTurbo(match) {
@@ -78,6 +106,7 @@ function sanitizeTelegramHTML(text) {
 
 module.exports = {
 	openDotaGet,
+	clearOpenDotaCache,
 	openDotaPost,
 	isTurbo,
 	isWin,
